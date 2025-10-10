@@ -12,6 +12,8 @@ require (
 	gorm.io/gorm v1.30.2
 )
 
+require github.com/google/uuid v1.6.0 // indirect
+
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/bytedance/sonic v1.13.3 // indirect
@@ -53,4 +55,5 @@ require (
 	golang.org/x/text v0.28.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
+	gorm.io/datatypes v1.2.7
 )

@@ -1,74 +1,92 @@
 package main
 
 import (
-    "backend/internal/config"
-    "backend/internal/handler"
-    "backend/internal/models"
-    "backend/internal/repository"
-    "backend/internal/service"
-    "github.com/gin-gonic/gin"
-    "github.com/gin-contrib/cors"
-    "gorm.io/driver/mysql"
-    "gorm.io/gorm"
-    "log"
-    "os"
-    "syscall"
-    "os/signal"
+	"backend/internal/config"
+	"backend/internal/handler"
+	"backend/internal/models"
+	"backend/internal/repository"
+	"backend/internal/service"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
 func main() {
-
-    
-    // Load konfigurasi
     cfg := config.LoadConfig()
-    log.Printf("DATABASE_URL: %s", cfg.DatabaseURL)
-
-    // Koneksi database MySQL
     db, err := gorm.Open(mysql.Open(cfg.DatabaseURL), &gorm.Config{})
     if err != nil {
         log.Fatalf("Failed to connect database: %v", err)
     }
 
-    // Auto-migrate tabel customers
-    db.AutoMigrate(&models.Admin{})
+    // 1) Migrate dulu
+    if err := db.AutoMigrate(&models.Admin{}, &models.Room{}, &models.Gallery{}, &models.News{}, &models.VisionMission{}); err != nil {
+        log.Fatalf("AutoMigrate failed: %v", err)
+    }
 
-    // Inisialisasi repository dan service
+    // 2) Drop index lama, buat index baru (composite)
+    m := db.Migrator()
+
+    // Kadang nama index unik lama beda-beda. Coba drop yang umum:
+    oldIdx := []string{
+        "idx_rooms_number",       // yang muncul di error kamu
+        "uix_rooms_number",
+        "rooms_number_unique",
+        "rooms_number_key",
+        "Number",                 // GORM bisa simpan index berdasar field
+    }
+    for _, name := range oldIdx {
+        if m.HasIndex(&models.Room{}, name) {
+            _ = m.DropIndex(&models.Room{}, name)
+        }
+    }
+
+    // Buat composite unique index sesuai tag di struct
+    // (harus ada tag `uniqueIndex:ux_room_number_deleted_at` di Number & DeletedAt)
+    if !m.HasIndex(&models.Room{}, "ux_room_number_deleted_at") {
+        if err := m.CreateIndex(&models.Room{}, "ux_room_number_deleted_at"); err != nil {
+            log.Printf("Create composite index failed: %v", err)
+        }
+    }
+    
+    // --- sisa kode kamu (wiring, router, dll) ---
     adminRepo := repository.NewAdminRepository(db)
     adminService := service.NewAdminService(adminRepo, cfg.JWTSecret)
 
-    // Setup Gin router
     r := gin.Default()
 
-    // Tambahkan middleware CORS
-    r.Use(cors.Default())
+    // CORS: izinkan hanya frontend-mu
+    corsCfg := cors.Config{
+        AllowOrigins:     []string{"http://localhost:3000"},
+        AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+        AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+        ExposeHeaders:    []string{"Content-Length"},
+        AllowCredentials: true, // <- penting jika pakai cookie/credentials
+        MaxAge:           12 * time.Hour,
+    }
+    r.Use(cors.New(corsCfg))
 
-    // Set batas ukuran file upload
-    r.MaxMultipartMemory = 8 << 20 // 8 MiB
+    r.MaxMultipartMemory = 8 << 20
     handler.SetupRoutes(r, adminService)
 
-    // Buat folder uploads
     if err := os.MkdirAll("uploads", os.ModePerm); err != nil {
         log.Fatalf("Failed to create uploads directory: %v", err)
     }
 
-    log.Println("========================================")
-    log.Println("🚀 Server running at http://localhost:8080")
-    log.Println("Tekan CTRL+C untuk menghentikan server")
-    log.Println("========================================")
-
-    log.Printf("Connected to database: %s", cfg.DatabaseURL)
-
-
-    // Setup graceful shutdown
-    quit := make(chan os.Signal, 1)
-    signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-    
     go func() {
         if err := r.Run(":8080"); err != nil {
-            log.Fatalf("❌ Failed to run server: %v", err)
+            log.Fatalf("Failed to run server: %v", err)
         }
     }()
 
+    quit := make(chan os.Signal, 1)
+    signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
     <-quit
     log.Println("Shutting down server...")
 }
