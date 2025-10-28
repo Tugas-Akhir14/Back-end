@@ -1,11 +1,15 @@
+// cmd/main.go
 package main
 
 import (
 	"backend/internal/config"
 	"backend/internal/handler"
-	"backend/internal/models"
-	"backend/internal/repository"
-	"backend/internal/service"
+	"backend/internal/models/auth"
+	"backend/internal/models/hotel"
+	"backend/internal/models/souvenir"
+	"backend/internal/repository/admin"
+	"backend/internal/service/serviceauth"
+
 	"log"
 	"os"
 	"os/signal"
@@ -19,74 +23,93 @@ import (
 )
 
 func main() {
-    cfg := config.LoadConfig()
-    db, err := gorm.Open(mysql.Open(cfg.DatabaseURL), &gorm.Config{})
-    if err != nil {
-        log.Fatalf("Failed to connect database: %v", err)
-    }
+	cfg := config.LoadConfig()
+	db, err := gorm.Open(mysql.Open(cfg.DatabaseURL), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("Failed to connect database: %v", err)
+	}
 
-    // 1) Migrate dulu
-    if err := db.AutoMigrate(&models.Admin{}, &models.Room{}, &models.Gallery{}, &models.News{}, &models.VisionMission{}); err != nil {
-        log.Fatalf("AutoMigrate failed: %v", err)
-    }
+	// === MIGRASE AMAN: CATEGORY DULU ===
+	if err := db.AutoMigrate(&souvenir.Category{}); err != nil {
+		log.Fatalf("Migrate Category failed: %v", err)
+	}
 
-    // 2) Drop index lama, buat index baru (composite)
-    m := db.Migrator()
+	// === SEEDER: Pastikan ada kategori default ===
+	var count int64
+	db.Model(&souvenir.Category{}).Count(&count)
+	if count == 0 {
+		defaultCats := []souvenir.Category{
+			{Nama: "Uncategorized", Slug: "uncategorized"},
+			{Nama: "Kaos", Slug: "kaos"},
+			{Nama: "Aksesoris", Slug: "aksesoris"},
+		}
+		for _, c := range defaultCats {
+			db.Create(&c)
+		}
+		log.Println("Seeder: Default categories created")
+	}
 
-    // Kadang nama index unik lama beda-beda. Coba drop yang umum:
-    oldIdx := []string{
-        "idx_rooms_number",       // yang muncul di error kamu
-        "uix_rooms_number",
-        "rooms_number_unique",
-        "rooms_number_key",
-        "Number",                 // GORM bisa simpan index berdasar field
-    }
-    for _, name := range oldIdx {
-        if m.HasIndex(&models.Room{}, name) {
-            _ = m.DropIndex(&models.Room{}, name)
-        }
-    }
+	// === UPDATE PRODUCT YANG CATEGORY_ID INVALID ===
+	db.Exec(`
+		UPDATE products 
+		SET category_id = 1 
+		WHERE category_id IS NULL 
+		   OR category_id NOT IN (SELECT id FROM categories)
+	`)
 
-    // Buat composite unique index sesuai tag di struct
-    // (harus ada tag `uniqueIndex:ux_room_number_deleted_at` di Number & DeletedAt)
-    if !m.HasIndex(&models.Room{}, "ux_room_number_deleted_at") {
-        if err := m.CreateIndex(&models.Room{}, "ux_room_number_deleted_at"); err != nil {
-            log.Printf("Create composite index failed: %v", err)
-        }
-    }
-    
-    // --- sisa kode kamu (wiring, router, dll) ---
-    adminRepo := repository.NewAdminRepository(db)
-    adminService := service.NewAdminService(adminRepo, cfg.JWTSecret)
+	// === MIGRASE PRODUCT SETELAH CATEGORY ===
+	if err := db.AutoMigrate(
+		&auth.Admin{},
+		&hotel.Room{},
+		&hotel.Gallery{},
+		&hotel.News{},
+		&hotel.VisionMission{},
+		&souvenir.Product{},
+	); err != nil {
+		log.Fatalf("AutoMigrate failed: %v", err)
+	}
 
-    r := gin.Default()
+	// === INDEX HOTEL (tetap) ===
+	m := db.Migrator()
+	oldIdx := []string{"idx_rooms_number", "uix_rooms_number", "rooms_number_unique", "Number"}
+	for _, name := range oldIdx {
+		if m.HasIndex(&hotel.Room{}, name) {
+			_ = m.DropIndex(&hotel.Room{}, name)
+		}
+	}
+	if !m.HasIndex(&hotel.Room{}, "ux_room_number_deleted_at") {
+		_ = m.CreateIndex(&hotel.Room{}, "ux_room_number_deleted_at")
+	}
 
-    // CORS: izinkan hanya frontend-mu
-    corsCfg := cors.Config{
-        AllowOrigins:     []string{"http://localhost:3000"},
-        AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-        AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
-        ExposeHeaders:    []string{"Content-Length"},
-        AllowCredentials: true, // <- penting jika pakai cookie/credentials
-        MaxAge:           12 * time.Hour,
-    }
-    r.Use(cors.New(corsCfg))
+	// === WIRING ===
+	adminRepo := admin.NewAdminRepository(db)
+	adminService := serviceauth.NewAdminService(adminRepo, cfg.JWTSecret)
 
-    r.MaxMultipartMemory = 8 << 20
-    handler.SetupRoutes(r, adminService)
+	r := gin.Default()
+	corsCfg := cors.Config{
+		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}
+	r.Use(cors.New(corsCfg))
+	r.MaxMultipartMemory = 8 << 20
 
-    if err := os.MkdirAll("uploads", os.ModePerm); err != nil {
-        log.Fatalf("Failed to create uploads directory: %v", err)
-    }
+	handler.SetupRoutes(r, adminService)
 
-    go func() {
-        if err := r.Run(":8080"); err != nil {
-            log.Fatalf("Failed to run server: %v", err)
-        }
-    }()
+	if err := os.MkdirAll("uploads", os.ModePerm); err != nil {
+		log.Fatalf("Failed to create uploads directory: %v", err)
+	}
 
-    quit := make(chan os.Signal, 1)
-    signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-    <-quit
-    log.Println("Shutting down server...")
+	go func() {
+		if err := r.Run(":8080"); err != nil {
+			log.Fatalf("Failed to run server: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down server...")
 }

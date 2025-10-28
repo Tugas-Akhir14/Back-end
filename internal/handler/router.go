@@ -1,66 +1,71 @@
+// backend/internal/handler/routes.go
 package handler
 
 import (
 	"backend/internal/config"
-	"backend/internal/repository"
-	"backend/internal/service"
+	"backend/internal/repository/repohotel"
+	"backend/internal/repository/reposouvenir" // TAMBAHAN
+	"backend/internal/service/serviceauth"
+	"backend/internal/service/hotelservice"
+	"backend/internal/service/souvenirservice" // TAMBAHAN
 	"backend/middleware"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"backend/internal/handler/auth"
+	"backend/internal/handler/hotel"
+	"backend/internal/handler/souvenirhandler" // TAMBAHAN
 )
 
-func SetupRoutes(r *gin.Engine, adminService service.AdminService) {
-	// ==== 404 JSON biar jelas kalau path salah ====
+func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 	r.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "route not found"})
 	})
 
-	// ==== Health ====
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
-	// ==== Admin Auth (public) ====
-	adm := NewAdminHandler(adminService)
+	// === AUTH ===
+	adm := auth.NewAdminHandler(adminService)
 	r.POST("/admins/register", adm.Register)
 	r.POST("/admins/login", adm.Login)
 	r.GET("/admins/profile", middleware.AuthMiddleware(), adm.GetProfile)
 
-	// ==== Wiring DB & services ====
+	// === DATABASE ===
 	db := config.GetDB()
 
-	roomH := NewRoomHandler(
-		service.NewRoomService(
-			repository.NewRoomRepository(db),
-		),
-	)
-	galleryH := NewGalleryHandler(
-		service.NewGalleryService(
-			repository.NewGalleryRepository(db),
-		),
-	)
-	newsH := NewNewsHandler(
-		service.NewNewsService(
-			repository.NewNewsRepository(db),
-		),
-	)
-	visionMissionH := NewVisionMissionHandler(
-		service.NewVisionMissionService(
-			repository.NewVisionMissionRepository(db),
-		),
-	)
-	// ==== Protected API (WAJIB token) ====
+	// === HOTEL SERVICES ===
+	roomH := hotel.NewRoomHandler(hotelservice.NewRoomService(repohotel.NewRoomRepository(db)))
+	galleryH := hotel.NewGalleryHandler(hotelservice.NewGalleryService(repohotel.NewGalleryRepository(db)))
+	newsH := hotel.NewNewsHandler(hotelservice.NewNewsService(repohotel.NewNewsRepository(db)))
+	visionMissionH := hotel.NewVisionMissionHandler(hotelservice.NewVisionMissionService(repohotel.NewVisionMissionRepository(db)))
+
+	// === SOUVENIR SERVICES (BARU) ===
+	// Product
+	productRepo := reposouvenir.NewProductRepository(db)
+	productService := souvenirservice.NewProductService(productRepo)
+	productH := souvenirhandler.NewProductHandler(productService)
+
+	// Category
+	categoryRepo := reposouvenir.NewCategoryRepository(db)
+	categoryService := souvenirservice.NewCategoryService(categoryRepo)
+	categoryH := souvenirhandler.NewCategoryHandler(categoryService)
+
+	// === STATIC FILES ===
+	r.Static("/uploads", "./uploads")
+
+	// === API GROUP (PROTECTED) ===
 	api := r.Group("/api", middleware.AuthMiddleware())
 	{
-		// Rooms
+		// --- HOTEL MODULE ---
 		api.POST("/rooms", roomH.Create)
 		api.GET("/rooms", roomH.List)
 		api.GET("/rooms/:id", roomH.GetByID)
 		api.PUT("/rooms/:id", roomH.Update)
 		api.DELETE("/rooms/:id", roomH.Delete)
 
-		// Galleries
 		api.POST("/galleries", galleryH.Create)
 		api.GET("/galleries", galleryH.List)
 		api.GET("/galleries/:id", galleryH.GetByID)
@@ -68,16 +73,31 @@ func SetupRoutes(r *gin.Engine, adminService service.AdminService) {
 		api.PUT("/galleries/:id/image", galleryH.UpdateImage)
 		api.DELETE("/galleries/:id", galleryH.Delete)
 
-		// News (CRUD; read di-protect sesuai kebutuhan Anda sekarang)
-		api.GET("/news", newsH.List)          // ?page=&page_size=&q=&status=
+		api.GET("/news", newsH.List)
 		api.GET("/news/:id", newsH.GetByID)
 		api.GET("/news/slug/:slug", newsH.GetBySlug)
-		api.POST("/news", newsH.Create)       // form-data (file "image")
-		api.PUT("/news/:id", newsH.Update)    // form-data (image opsional)
+		api.POST("/news", newsH.Create)
+		api.PUT("/news/:id", newsH.Update)
 		api.DELETE("/news/:id", newsH.Delete)
 
-		// Vision & Mission (protected PUT)
 		api.GET("/visi-misi", visionMissionH.Get)
 		api.PUT("/visi-misi", visionMissionH.Upsert)
+
+		// --- SOUVENIR: CATEGORY ---
+		api.POST("/categories", categoryH.Create)
+		api.GET("/categories", categoryH.GetAll)
+		api.GET("/categories/:id", categoryH.GetByID)
+		api.PUT("/categories/:id", categoryH.Update)
+		api.DELETE("/categories/:id", categoryH.Delete)
+
+		// --- SOUVENIR: PRODUCT ---
+		api.POST("/products", productH.CreateProduct)
+		api.GET("/products", productH.GetAllProducts)
+		api.GET("/products/:id", productH.GetProduct)
+		api.PUT("/products/:id", productH.UpdateProduct)
+		api.DELETE("/products/:id", productH.DeleteProduct)
+
+		// Di dalam grup /api
+		api.GET("/products/category/:category_id", productH.GetProductsByCategory)
 	}
 }
