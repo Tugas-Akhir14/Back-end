@@ -5,6 +5,8 @@ import (
 	"backend/internal/config"
 	"backend/internal/handler"
 	"backend/internal/models/auth"
+	"backend/internal/models/book"
+	"backend/internal/models/cafe"
 	"backend/internal/models/hotel"
 	"backend/internal/models/souvenir"
 	"backend/internal/repository/admin"
@@ -29,7 +31,7 @@ func main() {
 		log.Fatalf("Failed to connect database: %v", err)
 	}
 
-	// === MIGRASE AMAN: CATEGORY DULU ===
+	// === MIGRASE SOUVENIR DULU (karena ada seeder) ===
 	if err := db.AutoMigrate(&souvenir.Category{}); err != nil {
 		log.Fatalf("Migrate Category failed: %v", err)
 	}
@@ -57,7 +59,7 @@ func main() {
 		   OR category_id NOT IN (SELECT id FROM categories)
 	`)
 
-	// === MIGRASE PRODUCT SETELAH CATEGORY ===
+	// === MIGRASE SEMUA MODEL SETELAH CATEGORY ===
 	if err := db.AutoMigrate(
 		&auth.Admin{},
 		&hotel.Room{},
@@ -65,11 +67,15 @@ func main() {
 		&hotel.News{},
 		&hotel.VisionMission{},
 		&souvenir.Product{},
+		&book.CategoryBook{},   // ← DIPINDAH KE SINI
+		&book.ProductBook{},
+		&cafe.CategoryCafe{},
+		&cafe.ProductCafe{},  // ← DIPINDAH KE SINI
 	); err != nil {
 		log.Fatalf("AutoMigrate failed: %v", err)
 	}
 
-	// === INDEX HOTEL (tetap) ===
+	// === INDEX HOTEL ===
 	m := db.Migrator()
 	oldIdx := []string{"idx_rooms_number", "uix_rooms_number", "rooms_number_unique", "Number"}
 	for _, name := range oldIdx {
@@ -96,12 +102,15 @@ func main() {
 	r.Use(cors.New(corsCfg))
 	r.MaxMultipartMemory = 8 << 20
 
+	// === SETUP ROUTES (termasuk public & admin) ===
 	handler.SetupRoutes(r, adminService)
 
+	// === UPLOADS FOLDER ===
 	if err := os.MkdirAll("uploads", os.ModePerm); err != nil {
 		log.Fatalf("Failed to create uploads directory: %v", err)
 	}
 
+	// === RUN SERVER ===
 	go func() {
 		if err := r.Run(":8080"); err != nil {
 			log.Fatalf("Failed to run server: %v", err)
