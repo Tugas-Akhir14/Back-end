@@ -2,6 +2,7 @@
 package main
 
 import (
+	 _ "backend/utils"
 	"backend/internal/config"
 	"backend/internal/handler"
 	"backend/internal/models/auth"
@@ -20,23 +21,21 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/mysql"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
 func main() {
-	cfg := config.LoadConfig()
-	db, err := gorm.Open(mysql.Open(cfg.DatabaseURL), &gorm.Config{})
-	if err != nil {
-		log.Fatalf("Failed to connect database: %v", err)
-	}
+	// Load config & inisialisasi DB sekali
+	config.LoadConfig()
+	db := config.InitDB() // <-- PAKAI INI, BUKAN gorm.Open
 
-	// === MIGRASE SOUVENIR DULU (karena ada seeder) ===
+	// === MIGRASE SOUVENIR DULU ===
 	if err := db.AutoMigrate(&souvenir.Category{}); err != nil {
 		log.Fatalf("Migrate Category failed: %v", err)
 	}
 
-	// === SEEDER: Pastikan ada kategori default ===
+	// === SEEDER KATEGORI ===
 	var count int64
 	db.Model(&souvenir.Category{}).Count(&count)
 	if count == 0 {
@@ -51,7 +50,7 @@ func main() {
 		log.Println("Seeder: Default categories created")
 	}
 
-	// === UPDATE PRODUCT YANG CATEGORY_ID INVALID ===
+	// === UPDATE PRODUCT INVALID ===
 	db.Exec(`
 		UPDATE products 
 		SET category_id = 1 
@@ -59,7 +58,7 @@ func main() {
 		   OR category_id NOT IN (SELECT id FROM categories)
 	`)
 
-	// === MIGRASE SEMUA MODEL SETELAH CATEGORY ===
+	// === MIGRASE SEMUA MODEL ===
 	if err := db.AutoMigrate(
 		&auth.Admin{},
 		&hotel.Room{},
@@ -67,13 +66,16 @@ func main() {
 		&hotel.News{},
 		&hotel.VisionMission{},
 		&souvenir.Product{},
-		&book.CategoryBook{},   // ← DIPINDAH KE SINI
+		&book.CategoryBook{},
 		&book.ProductBook{},
 		&cafe.CategoryCafe{},
-		&cafe.ProductCafe{},  // ← DIPINDAH KE SINI
+		&cafe.ProductCafe{},
 	); err != nil {
 		log.Fatalf("AutoMigrate failed: %v", err)
 	}
+
+	// === SEED SUPERADMIN ===
+	seedSuperAdmin(db)
 
 	// === INDEX HOTEL ===
 	m := db.Migrator()
@@ -89,7 +91,7 @@ func main() {
 
 	// === WIRING ===
 	adminRepo := admin.NewAdminRepository(db)
-	adminService := serviceauth.NewAdminService(adminRepo, cfg.JWTSecret)
+	adminService := serviceauth.NewAdminService(adminRepo, config.GetConfig().JWTSecret)
 
 	r := gin.Default()
 	corsCfg := cors.Config{
@@ -102,15 +104,12 @@ func main() {
 	r.Use(cors.New(corsCfg))
 	r.MaxMultipartMemory = 8 << 20
 
-	// === SETUP ROUTES (termasuk public & admin) ===
 	handler.SetupRoutes(r, adminService)
 
-	// === UPLOADS FOLDER ===
 	if err := os.MkdirAll("uploads", os.ModePerm); err != nil {
 		log.Fatalf("Failed to create uploads directory: %v", err)
 	}
 
-	// === RUN SERVER ===
 	go func() {
 		if err := r.Run(":8080"); err != nil {
 			log.Fatalf("Failed to run server: %v", err)
@@ -121,4 +120,27 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Println("Shutting down server...")
+}
+
+// === SEEDER SUPERADMIN ===
+func seedSuperAdmin(db *gorm.DB) {
+	hashed, _ := bcrypt.GenerateFromPassword([]byte("rahasia123"), bcrypt.DefaultCost)
+	super := auth.Admin{
+		FullName:    "Super Admin",
+		Email:       "supperpedrooo@gmail.com",
+		PhoneNumber: "08123456789",
+		Password:    string(hashed),
+		Role:        auth.RoleSuperAdmin,
+		IsApproved:  true,
+	}
+
+	var count int64
+	db.Model(&auth.Admin{}).Where("email = ?", super.Email).Count(&count)
+	if count == 0 {
+		if err := db.Create(&super).Error; err != nil {
+			log.Printf("Gagal seed superadmin: %v", err)
+		} else {
+			log.Println("Superadmin berhasil dibuat")
+		}
+	}
 }

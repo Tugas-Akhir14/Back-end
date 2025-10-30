@@ -1,8 +1,9 @@
+// middleware/middleware.go
 package middleware
 
 import (
 	"backend/internal/config"
-	"errors"
+	"backend/internal/models/auth"
 	"net/http"
 	"strings"
 
@@ -11,43 +12,47 @@ import (
 )
 
 func AuthMiddleware() gin.HandlerFunc {
-    return func(c *gin.Context) {
-        // Biarkan preflight lewat tanpa validasi token; header CORS akan
-        // diisi oleh middleware cors.New(...) di main.go
-        if c.Request.Method == http.MethodOptions {
-            c.AbortWithStatus(http.StatusNoContent)
-            return
-        }
+	return func(c *gin.Context) {
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
 
-        authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
-        if authHeader == "" {
-            c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization token diperlukan"})
-            c.Abort()
-            return
-        }
-        
-        parts := strings.SplitN(authHeader, " ", 2)
-        if len(parts) != 2 || parts[0] != "Bearer" {
-            c.JSON(http.StatusUnauthorized, gin.H{"error": "Header Authorization tidak valid"})
-            c.Abort()
-            return
-        }
-        tokenString := strings.Trim(parts[1], " \t\r\n\"")
+		authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
+		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "token diperlukan"})
+			c.Abort()
+			return
+		}
 
-        claims := jwt.MapClaims{}
-        token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-            if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-                return nil, errors.New("metode penandatangan tidak didukung")
-            }
-            return []byte(config.JWTSecret), nil
-        })
-        if err != nil || !token.Valid {
-            c.JSON(http.StatusUnauthorized, gin.H{"error": "Token tidak valid atau sudah kedaluwarsa"})
-            c.Abort()
-            return
-        }
+		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+		claims := jwt.MapClaims{}
+		token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
+			return []byte(config.GetConfig().JWTSecret), nil
+		})
 
-        c.Set("user_id", claims["user_id"])
-        c.Next()
-    }
+		if err != nil || !token.Valid {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "token tidak valid"})
+			c.Abort()
+			return
+		}
+
+		userID := uint(claims["user_id"].(float64))
+		role := auth.Role(claims["role"].(string))
+
+		c.Set("user_id", userID)
+		c.Set("role", string(role))
+
+		// Cek approval untuk admin_*
+		if strings.HasPrefix(string(role), "admin_") && role != auth.RoleSuperAdmin {
+			var admin auth.Admin
+			if err := config.GetDB().Select("is_approved").Where("id = ?", userID).First(&admin).Error; err != nil || !admin.IsApproved {
+				c.JSON(http.StatusForbidden, gin.H{"error": "akun belum disetujui"})
+				c.Abort()
+				return
+			}
+		}
+
+		c.Next()
+	}
 }

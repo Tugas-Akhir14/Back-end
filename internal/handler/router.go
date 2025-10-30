@@ -94,6 +94,13 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 		public.GET("/books/category/:category_id", bookProductH.GetBooksByCategory)
 	}
 
+	admin := r.Group("", middleware.AuthMiddleware()) // HAPUS /api
+{
+	admin.GET("/pending-admins", adm.GetPending)
+	admin.PATCH("/admins/approve/:id", adm.ApproveUser)
+	// ... route lain tetap di /api
+
+
 	// === ADMIN API ===
 	admin := r.Group("/api", middleware.AuthMiddleware())
 	{
@@ -154,5 +161,7 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 		admin.POST("/cafe-products", cafeProductH.CreateProduct)
 		admin.PUT("/cafe-products/:id", cafeProductH.UpdateProduct)
 		admin.DELETE("/cafe-products/:id", cafeProductH.DeleteProduct)
+
 	}
+}
 }

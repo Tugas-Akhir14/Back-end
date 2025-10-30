@@ -1,101 +1,108 @@
+// internal/handler/auth/admin_handler.go
 package auth
 
 import (
-    "backend/internal/models/auth"
-    "backend/internal/service/serviceauth"
-    "github.com/gin-gonic/gin"
-    "net/http"
-    "log"
-    "fmt"
-    "strconv"
+	"backend/internal/models/auth"
+	"backend/internal/service/serviceauth"
+	"backend/utils"
+	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
 )
 
 type AdminHandler struct {
-    service serviceauth.AdminService
+	service serviceauth.AdminService
 }
 
 func NewAdminHandler(service serviceauth.AdminService) *AdminHandler {
-    return &AdminHandler{service}
+	return &AdminHandler{service}
 }
 
 func (h *AdminHandler) Register(c *gin.Context) {
-    var admin auth.Admin
+	var req serviceauth.RegisterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
-    // Bind form-data ke struct Admin
-    if err := c.ShouldBind(&admin); err != nil {
-        log.Printf("Error binding form data: %v", err)
-        c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
-        return
-    }
+	admin, err := h.service.Register(&req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
-    // Validasi apakah password dan confirm_password cocok
-    if admin.Password != admin.ConfirmPassword {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "Passwords do not match"})
-        return
-    }
+	// Kirim email jika perlu approval
+	if !admin.IsApproved && admin.Role != "guest" {
+		go utils.SendApprovalPendingEmail(admin.Email, admin.FullName)
+	}
 
-    // Panggil service untuk mendaftarkan admin
-    err := h.service.Register(&admin, admin.Password)
-    if err != nil {
-        log.Printf("Error registering admin: %v", err)
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to register admin: " + err.Error()})
-        return
-    }
+	msg := "Registrasi berhasil."
+	if !admin.IsApproved {
+		msg += " Menunggu persetujuan Superadmin."
+	}
 
-    // Return success response
-    c.JSON(http.StatusCreated, gin.H{"message": "Admin registered successfully"})
+	c.JSON(http.StatusCreated, gin.H{"message": msg, "data": admin})
 }
+
 
 
 func (h *AdminHandler) Login(c *gin.Context) {
-    var loginData struct {
-        Email    string `json:"email" binding:"required,email"`
-        Password string `json:"password" binding:"required,min=6"`
-    }
-    if err := c.ShouldBindJSON(&loginData); err != nil {
-        log.Printf("Login binding error: %v", err)
-        c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
-        return
-    }
+	var login struct {
+		Email    string `json:"email" binding:"required,email"`
+		Password string `json:"password" binding:"required,min=6"`
+	}
+	if err := c.ShouldBindJSON(&login); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
-    token, err := h.service.Login(loginData.Email, loginData.Password)
-    if err != nil {
-        log.Printf("Login error: %v", err)
-        c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-        return
-    }
+	resp, err := h.service.Login(login.Email, login.Password)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
 
-    c.JSON(http.StatusOK, gin.H{
-        "message": "Login successful",
-        "token":   token,
-    })
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Login berhasil",
+		"token":   resp.Token,
+		"user":    resp.User,
+	})
 }
 
 func (h *AdminHandler) GetProfile(c *gin.Context) {
-    // Mengambil user_id dari konteks yang diset oleh middleware
-    userID, exists := c.Get("user_id")
-    if !exists {
-        c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-        return
-    }
+	userID := c.GetUint("user_id")
+	admin, err := h.service.GetProfile(userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": admin})
+}
 
-    // Mengonversi userID ke uint (karena ID disimpan sebagai string dalam konteks)
-    id, err := strconv.ParseUint(fmt.Sprint(userID), 10, 32)
-    if err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "ID pengguna tidak valid"})
-        return
-    }
+func (h *AdminHandler) ApproveUser(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	role := auth.Role(c.GetString("role"))
+	if err := h.service.ApproveUser(uint(id), role); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
 
-    // Mengambil profil admin berdasarkan ID
-    admin, err := h.service.GetProfile(uint(id))
-    if err != nil {
-        c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-        return
-    }
+	// Kirim email sukses
+	admin, _ := h.service.GetProfile(uint(id))
+	if admin != nil {
+		go utils.SendApprovalSuccessEmail(admin.Email, admin.FullName)
+	}
 
-    // Mengembalikan profil admin dalam format JSON
-    c.JSON(http.StatusOK, gin.H{
-        "message": "Profil berhasil diambil",
-        "data":    admin,
-    })
+	c.JSON(http.StatusOK, gin.H{"message": "User disetujui"})
+}
+
+func (h *AdminHandler) GetPending(c *gin.Context) {
+	role := auth.Role(c.GetString("role"))
+	admins, err := h.service.GetPendingAdmins(role)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": admins})
 }

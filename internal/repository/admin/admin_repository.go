@@ -1,3 +1,4 @@
+// internal/repository/admin/admin_repository.go
 package admin
 
 import (
@@ -10,6 +11,8 @@ type AdminRepository interface {
 	Create(admin *auth.Admin) error
 	FindByEmail(email string) (*auth.Admin, error)
 	FindByID(id uint) (*auth.Admin, error)
+	Approve(id uint) error
+	GetPending() ([]auth.Admin, error)
 }
 
 type adminRepository struct {
@@ -21,35 +24,39 @@ func NewAdminRepository(db *gorm.DB) AdminRepository {
 }
 
 func (r *adminRepository) Create(admin *auth.Admin) error {
-    if err := r.db.Create(admin).Error; err != nil {
-        return err // Menangani error jika ada masalah saat penyimpanan
-    }
-    return nil
+	return r.db.Create(admin).Error
 }
 
-
-// FindByEmail finds an admin by email
 func (r *adminRepository) FindByEmail(email string) (*auth.Admin, error) {
 	var admin auth.Admin
 	err := r.db.Where("email = ?", email).First(&admin).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil // Return nil if no record is found
+			return nil, nil
 		}
-		return nil, err // Return the error if something else goes wrong
+		return nil, err
 	}
 	return &admin, nil
 }
 
-// FindByID finds an admin by ID
 func (r *adminRepository) FindByID(id uint) (*auth.Admin, error) {
 	var admin auth.Admin
 	err := r.db.Where("id = ?", id).First(&admin).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil // Return nil if no record is found
+			return nil, nil
 		}
-		return nil, err // Return the error if something else goes wrong
+		return nil, err
 	}
 	return &admin, nil
+}
+
+func (r *adminRepository) Approve(id uint) error {
+	return r.db.Model(&auth.Admin{}).Where("id = ?", id).Update("is_approved", true).Error
+}
+
+func (r *adminRepository) GetPending() ([]auth.Admin, error) {
+	var admins []auth.Admin
+	err := r.db.Where("role LIKE 'admin_%' AND is_approved = ?", false).Find(&admins).Error
+	return admins, err
 }
