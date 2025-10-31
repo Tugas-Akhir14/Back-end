@@ -157,10 +157,17 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 		admin.POST("/cafe-categories", cafeCategoryH.Create)
 		admin.PUT("/cafe-categories/:id", cafeCategoryH.Update)
 		admin.DELETE("/cafe-categories/:id", cafeCategoryH.Delete)
+		admin.GET("/cafe-categories", cafeCategoryH.GetAll)
+	
 
 		admin.POST("/cafe-products", cafeProductH.CreateProduct)
 		admin.PUT("/cafe-products/:id", cafeProductH.UpdateProduct)
 		admin.DELETE("/cafe-products/:id", cafeProductH.DeleteProduct)
+
+				// TAMBAHKAN INI: Route untuk GET
+		admin.GET("/cafe-products", cafeProductH.ListProducts)                    // List semua / filter by category
+		admin.GET("/cafe-products/:id", cafeProductH.GetProduct)                  // Detail product
+		admin.GET("/cafe-categories/:category_id/products", cafeProductH.GetProductsByCategory) 
 
 	}
 }
