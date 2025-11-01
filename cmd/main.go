@@ -2,7 +2,7 @@
 package main
 
 import (
-	 _ "backend/utils"
+	_ "backend/utils"
 	"backend/internal/config"
 	"backend/internal/handler"
 	"backend/internal/models/auth"
@@ -12,7 +12,6 @@ import (
 	"backend/internal/models/souvenir"
 	"backend/internal/repository/admin"
 	"backend/internal/service/serviceauth"
-
 	"log"
 	"os"
 	"os/signal"
@@ -26,73 +25,27 @@ import (
 )
 
 func main() {
-	// Load config & inisialisasi DB sekali
 	config.LoadConfig()
-	db := config.InitDB() // <-- PAKAI INI, BUKAN gorm.Open
+	db := config.InitDB()
 
-	// === MIGRASE SOUVENIR DULU ===
-	if err := db.AutoMigrate(&souvenir.Category{}); err != nil {
-		log.Fatalf("Migrate Category failed: %v", err)
-	}
-
-	// === SEEDER KATEGORI ===
-	var count int64
-	db.Model(&souvenir.Category{}).Count(&count)
-	if count == 0 {
-		defaultCats := []souvenir.Category{
-			{Nama: "Uncategorized", Slug: "uncategorized"},
-			{Nama: "Kaos", Slug: "kaos"},
-			{Nama: "Aksesoris", Slug: "aksesoris"},
-		}
-		for _, c := range defaultCats {
-			db.Create(&c)
-		}
-		log.Println("Seeder: Default categories created")
-	}
-
-	// === UPDATE PRODUCT INVALID ===
-	db.Exec(`
-		UPDATE products 
-		SET category_id = 1 
-		WHERE category_id IS NULL 
-		   OR category_id NOT IN (SELECT id FROM categories)
-	`)
-
-	// === MIGRASE SEMUA MODEL ===
+	// === MIGRASI & SEED ===
 	if err := db.AutoMigrate(
 		&auth.Admin{},
-		&hotel.Room{},
-		&hotel.Gallery{},
-		&hotel.News{},
-		&hotel.VisionMission{},
-		&souvenir.Product{},
-		&book.CategoryBook{},
-		&book.ProductBook{},
-		&cafe.CategoryCafe{},
-		&cafe.ProductCafe{},
+		&hotel.Room{}, &hotel.Gallery{}, &hotel.News{}, &hotel.VisionMission{},
+		&souvenir.Product{}, &souvenir.Category{},
+		&book.ProductBook{}, &book.CategoryBook{},
+		&cafe.ProductCafe{}, &cafe.CategoryCafe{},
 	); err != nil {
 		log.Fatalf("AutoMigrate failed: %v", err)
 	}
 
-	// === SEED SUPERADMIN ===
 	seedSuperAdmin(db)
 
-	// === INDEX HOTEL ===
-	m := db.Migrator()
-	oldIdx := []string{"idx_rooms_number", "uix_rooms_number", "rooms_number_unique", "Number"}
-	for _, name := range oldIdx {
-		if m.HasIndex(&hotel.Room{}, name) {
-			_ = m.DropIndex(&hotel.Room{}, name)
-		}
-	}
-	if !m.HasIndex(&hotel.Room{}, "ux_room_number_deleted_at") {
-		_ = m.CreateIndex(&hotel.Room{}, "ux_room_number_deleted_at")
-	}
-
-	// === WIRING ===
+	// === REPO & SERVICE ===
 	adminRepo := admin.NewAdminRepository(db)
 	adminService := serviceauth.NewAdminService(adminRepo, config.GetConfig().JWTSecret)
 
+	// === GIN SETUP ===
 	r := gin.Default()
 	corsCfg := cors.Config{
 		AllowOrigins:     []string{"http://localhost:3000"},
@@ -104,12 +57,16 @@ func main() {
 	r.Use(cors.New(corsCfg))
 	r.MaxMultipartMemory = 8 << 20
 
+	// === ROUTES ===
 	handler.SetupRoutes(r, adminService)
 
+	// === STATIC ===
 	if err := os.MkdirAll("uploads", os.ModePerm); err != nil {
 		log.Fatalf("Failed to create uploads directory: %v", err)
 	}
+	r.Static("/uploads", "./uploads")
 
+	// === SERVER ===
 	go func() {
 		if err := r.Run(":8080"); err != nil {
 			log.Fatalf("Failed to run server: %v", err)
@@ -122,7 +79,6 @@ func main() {
 	log.Println("Shutting down server...")
 }
 
-// === SEEDER SUPERADMIN ===
 func seedSuperAdmin(db *gorm.DB) {
 	hashed, _ := bcrypt.GenerateFromPassword([]byte("rahasia123"), bcrypt.DefaultCost)
 	super := auth.Admin{

@@ -1,8 +1,9 @@
-// backend/internal/handler/routes.go
+// internal/handler/routes.go
 package handler
 
 import (
 	"backend/internal/config"
+	"backend/internal/models/auth" // TAMBAH INI
 	"backend/internal/repository/repohotel"
 	"backend/internal/repository/reposouvenir"
 	"backend/internal/service/serviceauth"
@@ -13,7 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"backend/internal/handler/auth"
+	"backend/internal/handler/authhandler"
 	"backend/internal/handler/hotel"
 	"backend/internal/handler/souvenirhandler"
 	"backend/internal/handler/bookhandler"
@@ -29,146 +30,122 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 	r.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "route not found"})
 	})
-
-	r.GET("/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
+	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
 
 	// === AUTH ===
-	adm := auth.NewAdminHandler(adminService)
+	adm := authhandler.NewAdminHandler(adminService)
 	r.POST("/admins/register", adm.Register)
 	r.POST("/admins/login", adm.Login)
 	r.GET("/admins/profile", middleware.AuthMiddleware(), adm.GetProfile)
 
-	// === DATABASE ===
 	db := config.GetDB()
 
-	// === HOTEL SERVICES ===
+	// === REPO & HANDLER ===
 	roomH := hotel.NewRoomHandler(hotelservice.NewRoomService(repohotel.NewRoomRepository(db)))
 	galleryH := hotel.NewGalleryHandler(hotelservice.NewGalleryService(repohotel.NewGalleryRepository(db)))
 	newsH := hotel.NewNewsHandler(hotelservice.NewNewsService(repohotel.NewNewsRepository(db)))
 	visionMissionH := hotel.NewVisionMissionHandler(hotelservice.NewVisionMissionService(repohotel.NewVisionMissionRepository(db)))
 
-	// === SOUVENIR SERVICES ===
-	souvenirProductRepo := reposouvenir.NewProductRepository(db)
-	souvenirProductService := souvenirservice.NewProductService(souvenirProductRepo)
-	souvenirProductH := souvenirhandler.NewProductHandler(souvenirProductService)
+	souvenirProductH := souvenirhandler.NewProductHandler(souvenirservice.NewProductService(reposouvenir.NewProductRepository(db)))
+	souvenirCategoryH := souvenirhandler.NewCategoryHandler(souvenirservice.NewCategoryService(reposouvenir.NewCategoryRepository(db)))
 
-	souvenirCategoryRepo := reposouvenir.NewCategoryRepository(db)
-	souvenirCategoryService := souvenirservice.NewCategoryService(souvenirCategoryRepo)
-	souvenirCategoryH := souvenirhandler.NewCategoryHandler(souvenirCategoryService)
-
-	// === BOOK SERVICES ===
-	bookCategoryRepo := repobook.NewCategoryRepository(db)
+	// FIX: bookProductH butuh 2 argumen (productService + categoryService)
 	bookProductRepo := repobook.NewProductRepository(db)
-
-	bookCategoryService := bookservice.NewCategoryService(bookCategoryRepo)
+	bookCategoryRepo := repobook.NewCategoryRepository(db)
 	bookProductService := bookservice.NewProductService(bookProductRepo, bookCategoryRepo)
+	bookProductH := bookhandler.NewProductHandler(bookProductService, bookservice.NewCategoryService(bookCategoryRepo))
 
-	bookCategoryH := bookhandler.NewCategoryHandler(bookCategoryService)
-	bookProductH := bookhandler.NewProductHandler(bookProductService, bookCategoryService)
-
-	// === CAFE SERVICES ===
-	cafeCategoryRepo := repocafe.NewCategoryRepository(db)
+	// FIX: cafeProductH butuh 2 argumen
 	cafeProductRepo := repocafe.NewProductRepository(db)
-
-	cafeCategoryService := cafeservice.NewCategoryService(cafeCategoryRepo)
+	cafeCategoryRepo := repocafe.NewCategoryRepository(db)
 	cafeProductService := cafeservice.NewProductService(cafeProductRepo, cafeCategoryRepo)
+	cafeProductH := cafehandler.NewProductHandler(cafeProductService, cafeservice.NewCategoryService(cafeCategoryRepo))
 
-	cafeCategoryH := cafehandler.NewCategoryHandler(cafeCategoryService)
-	cafeProductH := cafehandler.NewProductHandler(cafeProductService, cafeCategoryService)
-
-	// === STATIC FILES ===
-	r.Static("/uploads", "./uploads")
-
-	// === PUBLIC API ===
-	public := r.Group("/api")
-	{
-		// --- BOOK: CATEGORY (PUBLIC) ---
-		public.GET("/book-categories", bookCategoryH.GetAll)
-		public.GET("/book-categories/:id", bookCategoryH.GetByID)
-
-		// --- BOOK: PRODUCT (PUBLIC) ---
-		public.GET("/books", bookProductH.ListBooks)
-		public.GET("/books/:id", bookProductH.GetBook)
-		public.GET("/books/category/:category_id", bookProductH.GetBooksByCategory)
-	}
-
-	admin := r.Group("", middleware.AuthMiddleware()) // HAPUS /api
-{
-	admin.GET("/pending-admins", adm.GetPending)
-	admin.PATCH("/admins/approve/:id", adm.ApproveUser)
-	// ... route lain tetap di /api
-
+	bookCategoryH := bookhandler.NewCategoryHandler(bookservice.NewCategoryService(bookCategoryRepo))
+	cafeCategoryH := cafehandler.NewCategoryHandler(cafeservice.NewCategoryService(cafeCategoryRepo))
 
 	// === ADMIN API ===
 	admin := r.Group("/api", middleware.AuthMiddleware())
+
+	// SUPERADMIN ONLY
+	super := admin.Group("", middleware.RoleMiddleware(auth.RoleSuperAdmin))
 	{
-		// --- HOTEL MODULE ---
-		admin.POST("/rooms", roomH.Create)
-		admin.GET("/rooms", roomH.List)
-		admin.GET("/rooms/:id", roomH.GetByID)
-		admin.PUT("/rooms/:id", roomH.Update)
-		admin.DELETE("/rooms/:id", roomH.Delete)
-
-		admin.POST("/galleries", galleryH.Create)
-		admin.GET("/galleries", galleryH.List)
-		admin.GET("/galleries/:id", galleryH.GetByID)
-		admin.PUT("/galleries/:id", galleryH.Update)
-		admin.PUT("/galleries/:id/image", galleryH.UpdateImage)
-		admin.DELETE("/galleries/:id", galleryH.Delete)
-
-		admin.GET("/news", newsH.List)
-		admin.GET("/news/:id", newsH.GetByID)
-		admin.GET("/news/slug/:slug", newsH.GetBySlug)
-		admin.POST("/news", newsH.Create)
-		admin.PUT("/news/:id", newsH.Update)
-		admin.DELETE("/news/:id", newsH.Delete)
-
-		admin.GET("/visi-misi", visionMissionH.Get)
-		admin.PUT("/visi-misi", visionMissionH.Upsert)
-
-		// --- SOUVENIR: CATEGORY ---
-		admin.POST("/categories", souvenirCategoryH.Create)
-		admin.GET("/categories", souvenirCategoryH.GetAll)
-		admin.GET("/categories/:id", souvenirCategoryH.GetByID)
-		admin.PUT("/categories/:id", souvenirCategoryH.Update)
-		admin.DELETE("/categories/:id", souvenirCategoryH.Delete)
-
-		// --- SOUVENIR: PRODUCT ---
-		admin.POST("/products", souvenirProductH.CreateProduct)
-		admin.GET("/products", souvenirProductH.GetAllProducts)
-		admin.GET("/products/:id", souvenirProductH.GetProduct)
-		admin.PUT("/products/:id", souvenirProductH.UpdateProduct)
-		admin.DELETE("/products/:id", souvenirProductH.DeleteProduct)
-		admin.GET("/products/category/:category_id", souvenirProductH.GetProductsByCategory)
-
-		// --- BOOK: CATEGORY (ADMIN) ---
-		admin.POST("/book-categories", bookCategoryH.Create)
-		admin.PUT("/book-categories/:id", bookCategoryH.Update)
-		admin.DELETE("/book-categories/:id", bookCategoryH.Delete)
-
-		// --- BOOK: PRODUCT (ADMIN) ---
-		admin.POST("/books", bookProductH.CreateProduct)
-		admin.PUT("/books/:id", bookProductH.UpdateProduct)
-		admin.DELETE("/books/:id", bookProductH.DeleteProduct)
-
-		// === ADMIN API (tambah cafe) ===
-		admin.POST("/cafe-categories", cafeCategoryH.Create)
-		admin.PUT("/cafe-categories/:id", cafeCategoryH.Update)
-		admin.DELETE("/cafe-categories/:id", cafeCategoryH.Delete)
-		admin.GET("/cafe-categories", cafeCategoryH.GetAll)
-	
-
-		admin.POST("/cafe-products", cafeProductH.CreateProduct)
-		admin.PUT("/cafe-products/:id", cafeProductH.UpdateProduct)
-		admin.DELETE("/cafe-products/:id", cafeProductH.DeleteProduct)
-
-				// TAMBAHKAN INI: Route untuk GET
-		admin.GET("/cafe-products", cafeProductH.ListProducts)                    // List semua / filter by category
-		admin.GET("/cafe-products/:id", cafeProductH.GetProduct)                  // Detail product
-		admin.GET("/cafe-categories/:category_id/products", cafeProductH.GetProductsByCategory) 
-
+		super.GET("/pending-admins", adm.GetPending)
+		super.PATCH("/admins/approve/:id", adm.ApproveUser)
 	}
-}
+
+	// HOTEL
+	hotelGroup := admin.Group("", middleware.RoleMiddleware(auth.RoleAdminHotel, auth.RoleSuperAdmin))
+	{
+		hotelGroup.POST("/rooms", roomH.Create)
+		hotelGroup.GET("/rooms", roomH.List)
+		hotelGroup.GET("/rooms/:id", roomH.GetByID)
+		hotelGroup.PUT("/rooms/:id", roomH.Update)
+		hotelGroup.DELETE("/rooms/:id", roomH.Delete)
+
+		hotelGroup.POST("/galleries", galleryH.Create)
+		hotelGroup.GET("/galleries", galleryH.List)
+		hotelGroup.GET("/galleries/:id", galleryH.GetByID)
+		hotelGroup.PUT("/galleries/:id", galleryH.Update)
+		hotelGroup.PUT("/galleries/:id/image", galleryH.UpdateImage)
+		hotelGroup.DELETE("/galleries/:id", galleryH.Delete)
+
+		hotelGroup.GET("/news", newsH.List)
+		hotelGroup.GET("/news/:id", newsH.GetByID)
+		hotelGroup.GET("/news/slug/:slug", newsH.GetBySlug)
+		hotelGroup.POST("/news", newsH.Create)
+		hotelGroup.PUT("/news/:id", newsH.Update)
+		hotelGroup.DELETE("/news/:id", newsH.Delete)
+
+		hotelGroup.GET("/visi-misi", visionMissionH.Get)
+		hotelGroup.PUT("/visi-misi", visionMissionH.Upsert)
+	}
+
+	// SOUVENIR
+	souvenirGroup := admin.Group("", middleware.RoleMiddleware(auth.RoleAdminSouvenir, auth.RoleSuperAdmin))
+	{
+		souvenirGroup.POST("/categories", souvenirCategoryH.Create)
+		souvenirGroup.GET("/categories", souvenirCategoryH.GetAll)
+		souvenirGroup.GET("/categories/:id", souvenirCategoryH.GetByID)
+		souvenirGroup.PUT("/categories/:id", souvenirCategoryH.Update)
+		souvenirGroup.DELETE("/categories/:id", souvenirCategoryH.Delete)
+
+		souvenirGroup.POST("/products", souvenirProductH.CreateProduct)
+		souvenirGroup.GET("/products", souvenirProductH.GetAllProducts)
+		souvenirGroup.GET("/products/:id", souvenirProductH.GetProduct)
+		souvenirGroup.PUT("/products/:id", souvenirProductH.UpdateProduct)
+		souvenirGroup.DELETE("/products/:id", souvenirProductH.DeleteProduct)
+		souvenirGroup.GET("/products/category/:category_id", souvenirProductH.GetProductsByCategory)
+	}
+
+	// BOOK
+	bookGroup := admin.Group("", middleware.RoleMiddleware(auth.RoleAdminBuku, auth.RoleSuperAdmin))
+	{
+		bookGroup.POST("/book-categories", bookCategoryH.Create)
+		bookGroup.GET("/book-categories", bookCategoryH.GetAll)
+		bookGroup.GET("/book-categories/:id", bookCategoryH.GetByID)
+		bookGroup.PUT("/book-categories/:id", bookCategoryH.Update)
+		bookGroup.DELETE("/book-categories/:id", bookCategoryH.Delete)
+
+		bookGroup.POST("/books", bookProductH.CreateProduct)
+		bookGroup.GET("/books", bookProductH.ListBooks)
+		bookGroup.PUT("/books/:id", bookProductH.UpdateProduct)
+		bookGroup.DELETE("/books/:id", bookProductH.DeleteProduct)
+	}
+
+	// CAFE
+	cafeGroup := admin.Group("", middleware.RoleMiddleware(auth.RoleAdminCafe, auth.RoleSuperAdmin))
+	{
+		cafeGroup.POST("/cafe-categories", cafeCategoryH.Create)
+		cafeGroup.PUT("/cafe-categories/:id", cafeCategoryH.Update)
+		cafeGroup.DELETE("/cafe-categories/:id", cafeCategoryH.Delete)
+		cafeGroup.GET("/cafe-categories", cafeCategoryH.GetAll)
+
+		cafeGroup.POST("/cafe-products", cafeProductH.CreateProduct)
+		cafeGroup.PUT("/cafe-products/:id", cafeProductH.UpdateProduct)
+		cafeGroup.DELETE("/cafe-products/:id", cafeProductH.DeleteProduct)
+		cafeGroup.GET("/cafe-products", cafeProductH.ListProducts)
+		cafeGroup.GET("/cafe-products/:id", cafeProductH.GetProduct)
+		cafeGroup.GET("/cafe-categories/:category_id/products", cafeProductH.GetProductsByCategory)
+	}
 }

@@ -1,5 +1,5 @@
 // internal/handler/auth/admin_handler.go
-package auth
+package authhandler
 
 import (
 	"backend/internal/models/auth"

@@ -19,7 +19,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
-		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+		if !strings.HasPrefix(authHeader, "Bearer ") {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "token diperlukan"})
 			c.Abort()
 			return
@@ -43,7 +43,6 @@ func AuthMiddleware() gin.HandlerFunc {
 		c.Set("user_id", userID)
 		c.Set("role", string(role))
 
-		// Cek approval untuk admin_*
 		if strings.HasPrefix(string(role), "admin_") && role != auth.RoleSuperAdmin {
 			var admin auth.Admin
 			if err := config.GetDB().Select("is_approved").Where("id = ?", userID).First(&admin).Error; err != nil || !admin.IsApproved {
@@ -54,5 +53,22 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		c.Next()
+	}
+}
+
+func RoleMiddleware(allowed ...auth.Role) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		roleStr := c.GetString("role")
+		role := auth.Role(roleStr)
+
+		for _, r := range allowed {
+			if role == r {
+				c.Next()
+				return
+			}
+		}
+
+		c.JSON(http.StatusForbidden, gin.H{"error": "akses ditolak: role tidak diizinkan"})
+		c.Abort()
 	}
 }
