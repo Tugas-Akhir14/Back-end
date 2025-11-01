@@ -10,7 +10,7 @@ type GalleryService interface {
 	GetByID(id uint) (*hotel.Gallery, error)
 	List(roomID *uint, roomType string, includeGlobal bool, limit, offset int) ([]hotel.Gallery, int64, error)
 	Update(id uint, req hotel.UpdateGalleryRequest) (*hotel.Gallery, error)
-	Save(item *hotel.Gallery) error // <— TAMBAHAN: simpan semua field
+	Save(item *hotel.Gallery) error // simpan semua field (untuk update image)
 	Delete(id uint) error
 }
 
@@ -18,9 +18,10 @@ type galleryService struct{ repo repohotel.GalleryRepository }
 
 func NewGalleryService(repo repohotel.GalleryRepository) GalleryService { return &galleryService{repo} }
 
-func (s *galleryService) Create(item *hotel.Gallery) error { return s.repo.Create(item) }
-func (s *galleryService) GetByID(id uint) (*hotel.Gallery, error) { return s.repo.FindByID(id) }
-
+func (s *galleryService) Create(item *hotel.Gallery) error                 { return s.repo.Create(item) }
+func (s *galleryService) GetByID(id uint) (*hotel.Gallery, error)          { return s.repo.FindByID(id) }
+func (s *galleryService) Delete(id uint) error                             { return s.repo.Delete(id) }
+func (s *galleryService) Save(item *hotel.Gallery) error                   { return s.repo.Update(item) }
 func (s *galleryService) List(roomID *uint, roomType string, includeGlobal bool, limit, offset int) ([]hotel.Gallery, int64, error) {
 	return s.repo.List(repohotel.GalleryFilter{
 		RoomID: roomID, RoomType: roomType, IncludeGlobal: includeGlobal, Limit: limit, Offset: offset,
@@ -46,9 +47,3 @@ func (s *galleryService) Update(id uint, req hotel.UpdateGalleryRequest) (*hotel
 	}
 	return item, nil
 }
-
-func (s *galleryService) Save(item *hotel.Gallery) error { // <— TAMBAHAN
-	return s.repo.Update(item)
-}
-
-func (s *galleryService) Delete(id uint) error { return s.repo.Delete(id) }

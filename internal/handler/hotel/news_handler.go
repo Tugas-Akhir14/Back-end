@@ -22,7 +22,6 @@ func publicImageURL(c *gin.Context, path string) string {
 	if path == "" {
 		return ""
 	}
-	// Jika sudah absolute (http/https), langsung kembalikan
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
 		return path
 	}
@@ -31,8 +30,6 @@ func publicImageURL(c *gin.Context, path string) string {
 		scheme = "https"
 	}
 	host := c.Request.Host
-	// path di DB: "uploads/news/xxx.jpg"
-	// endpoint static: r.Static("/uploads", "./uploads") => prefix publik "/uploads"
 	if strings.HasPrefix(path, "/") {
 		return scheme + "://" + host + path
 	}
@@ -46,7 +43,58 @@ func (h *NewsHandler) normalizeImageURL(c *gin.Context, n *hotel.News) {
 	n.ImageURL = publicImageURL(c, n.ImageURL)
 }
 
-// Public: GET /news?page=1&page_size=10&q=...&status=published
+// ================== PUBLIC ==================
+
+// GET /public/news?page=&page_size=&q=
+func (h *NewsHandler) ListPublic(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	ps, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+	q := c.Query("q")
+
+	// paksa published only
+	data, total, err := h.svc.List(page, ps, q, "published")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	for i := range data {
+		h.normalizeImageURL(c, &data[i])
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"data":      data,
+		"total":     total,
+		"page":      page,
+		"page_size": ps,
+	})
+}
+
+// GET /public/news/:id
+func (h *NewsHandler) GetPublicByID(c *gin.Context) {
+	id64, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	item, err := h.svc.GetByID(uint(id64))
+	if err != nil || strings.ToLower(item.Status) != "published" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "news not found"})
+		return
+	}
+	h.normalizeImageURL(c, item)
+	c.JSON(http.StatusOK, gin.H{"data": item})
+}
+
+// GET /public/news/slug/:slug
+func (h *NewsHandler) GetPublicBySlug(c *gin.Context) {
+	slug := c.Param("slug")
+	item, err := h.svc.GetBySlug(slug)
+	if err != nil || strings.ToLower(item.Status) != "published" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "news not found"})
+		return
+	}
+	h.normalizeImageURL(c, item)
+	c.JSON(http.StatusOK, gin.H{"data": item})
+}
+
+// ================== ADMIN/PROTECTED ==================
+
+// Public: GET /api/news?page=1&page_size=10&q=...&status=published
 func (h *NewsHandler) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	ps, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
@@ -58,12 +106,9 @@ func (h *NewsHandler) List(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
-	// ubah image_url jadi URL publik
 	for i := range data {
 		h.normalizeImageURL(c, &data[i])
 	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"data":      data,
 		"total":     total,
@@ -72,7 +117,6 @@ func (h *NewsHandler) List(c *gin.Context) {
 	})
 }
 
-// Public: GET /news/:id
 func (h *NewsHandler) GetByID(c *gin.Context) {
 	id64, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 	item, err := h.svc.GetByID(uint(id64))
@@ -84,7 +128,6 @@ func (h *NewsHandler) GetByID(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": item})
 }
 
-// Public: GET /news/slug/:slug
 func (h *NewsHandler) GetBySlug(c *gin.Context) {
 	slug := c.Param("slug")
 	item, err := h.svc.GetBySlug(slug)
@@ -96,16 +139,14 @@ func (h *NewsHandler) GetBySlug(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": item})
 }
 
-// Protected (form-data): POST /news
 func (h *NewsHandler) Create(c *gin.Context) {
 	var input hotel.News
 	if err := c.ShouldBind(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input: " + err.Error()})
 		return
 	}
-	img, _ := c.FormFile("image") // optional
+	img, _ := c.FormFile("image")
 
-	// contoh ambil adminID dari middleware (sesuaikan claim mu)
 	var adminID uint = 0
 	if val, ok := c.Get("admin_id"); ok {
 		if v, ok2 := val.(uint); ok2 {
@@ -122,7 +163,6 @@ func (h *NewsHandler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"data": item})
 }
 
-// Protected (form-data): PUT /news/:id
 func (h *NewsHandler) Update(c *gin.Context) {
 	id64, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 
@@ -131,7 +171,7 @@ func (h *NewsHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input: " + err.Error()})
 		return
 	}
-	img, _ := c.FormFile("image") // optional
+	img, _ := c.FormFile("image")
 
 	var adminID uint = 0
 	if val, ok := c.Get("admin_id"); ok {
@@ -149,7 +189,6 @@ func (h *NewsHandler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": item})
 }
 
-// Protected: DELETE /news/:id
 func (h *NewsHandler) Delete(c *gin.Context) {
 	id64, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err := h.svc.Delete(uint(id64)); err != nil {

@@ -2,7 +2,6 @@ package repohotel
 
 import (
 	"backend/internal/models/hotel"
-
 	"gorm.io/gorm"
 )
 
@@ -23,17 +22,9 @@ func NewNewsRepository(db *gorm.DB) NewsRepository {
 	return &newsRepository{db}
 }
 
-func (r *newsRepository) Create(news *hotel.News) error {
-	return r.db.Create(news).Error
-}
-
-func (r *newsRepository) Update(news *hotel.News) error {
-	return r.db.Save(news).Error
-}
-
-func (r *newsRepository) Delete(id uint) error {
-	return r.db.Delete(&hotel.News{}, id).Error
-}
+func (r *newsRepository) Create(news *hotel.News) error { return r.db.Create(news).Error }
+func (r *newsRepository) Update(news *hotel.News) error { return r.db.Save(news).Error }
+func (r *newsRepository) Delete(id uint) error          { return r.db.Delete(&hotel.News{}, id).Error }
 
 func (r *newsRepository) FindByID(id uint) (*hotel.News, error) {
 	var n hotel.News
@@ -61,6 +52,10 @@ func (r *newsRepository) FindAll(page, pageSize int, q string, status string) ([
 	}
 	if status != "" {
 		query = query.Where("status = ?", status)
+		// kalau minta published, tampilkan yang sudah terbit saja
+		if status == "published" {
+			query = query.Where("published_at IS NOT NULL AND published_at <= NOW()")
+		}
 	}
 
 	if err := query.Count(&total).Error; err != nil {
@@ -68,7 +63,7 @@ func (r *newsRepository) FindAll(page, pageSize int, q string, status string) ([
 	}
 
 	offset := (page - 1) * pageSize
-	if err := query.Order("created_at DESC").Limit(pageSize).Offset(offset).Find(&list).Error; err != nil {
+	if err := query.Order("published_at DESC, created_at DESC").Limit(pageSize).Offset(offset).Find(&list).Error; err != nil {
 		return nil, 0, err
 	}
 	return list, total, nil

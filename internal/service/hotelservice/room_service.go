@@ -1,6 +1,7 @@
 package hotelservice
 
 import (
+	"context"
 	"errors"
 
 	"backend/internal/models/hotel"
@@ -13,6 +14,7 @@ type RoomService interface {
 	List(t, query string, limit, offset int) ([]hotel.Room, int64, error)
 	Update(id uint, req hotel.UpdateRoomRequest) (*hotel.Room, error)
 	Delete(id uint) error
+	ListPublic(ctx context.Context) ([]hotel.Room, error)
 }
 
 type roomService struct {
@@ -102,3 +104,14 @@ func (s *roomService) Update(id uint, req hotel.UpdateRoomRequest) (*hotel.Room,
 func (s *roomService) Delete(id uint) error {
 	return s.repo.Delete(id)
 }
+
+func (s *roomService) ListPublic(ctx context.Context) ([]hotel.Room, error) {
+	rooms, err := s.repo.GetAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return rooms, nil
+}
+
+

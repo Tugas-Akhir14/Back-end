@@ -3,7 +3,7 @@ package handler
 
 import (
 	"backend/internal/config"
-	"backend/internal/models/auth" // TAMBAH INI
+	"backend/internal/models/auth" 
 	"backend/internal/repository/repohotel"
 	"backend/internal/repository/reposouvenir"
 	"backend/internal/service/serviceauth"
@@ -64,6 +64,32 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 	bookCategoryH := bookhandler.NewCategoryHandler(bookservice.NewCategoryService(bookCategoryRepo))
 	cafeCategoryH := cafehandler.NewCategoryHandler(cafeservice.NewCategoryService(cafeCategoryRepo))
 
+	// REVIEW HOTEL
+	reviewRepo := repohotel.NewReviewRepository(db)
+	reviewService := hotelservice.NewReviewService(reviewRepo)
+	reviewH := hotel.NewReviewHandler(reviewService)
+
+	// === PUBLIC API (untuk landing page) ===
+	public := r.Group("/public")
+	{
+		// Rooms (ringkas untuk landing)
+		public.GET("/rooms", roomH.ListPublic)
+
+		// Galleries (tanpa auth)
+		public.GET("/gallery", galleryH.ListPublic)         
+		public.GET("/gallery/:id", galleryH.GetByID)        
+		public.GET("/rooms/:id/gallery", galleryH.ListByRoom) 
+
+		// Reviews publik
+		public.POST("/reviews", reviewH.Create)     
+		public.GET("/reviews", reviewH.GetApproved) 
+
+		// News (publik, hanya published)
+		public.GET("/news", newsH.ListPublic)                  // ?page=&page_size=&q=
+		public.GET("/news/:id", newsH.GetPublicByID)           // detail by ID, published only
+		public.GET("/news/slug/:slug", newsH.GetPublicBySlug) 
+	}
+
 	// === ADMIN API ===
 	admin := r.Group("/api", middleware.AuthMiddleware())
 
@@ -84,7 +110,7 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 		hotelGroup.DELETE("/rooms/:id", roomH.Delete)
 
 		hotelGroup.POST("/galleries", galleryH.Create)
-		hotelGroup.GET("/galleries", galleryH.List)
+		hotelGroup.GET("/galleries", galleryH.List) // versi admin, bebas param
 		hotelGroup.GET("/galleries/:id", galleryH.GetByID)
 		hotelGroup.PUT("/galleries/:id", galleryH.Update)
 		hotelGroup.PUT("/galleries/:id/image", galleryH.UpdateImage)
@@ -99,6 +125,10 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 
 		hotelGroup.GET("/visi-misi", visionMissionH.Get)
 		hotelGroup.PUT("/visi-misi", visionMissionH.Upsert)
+
+		hotelGroup.GET("/reviews/pending", reviewH.GetPending)
+		hotelGroup.PUT("/reviews/:id/approve", reviewH.Approve)
+		hotelGroup.DELETE("/reviews/:id", reviewH.Delete)
 	}
 
 	// SOUVENIR

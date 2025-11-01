@@ -2,6 +2,7 @@ package repohotel
 
 import (
 	"backend/internal/models/hotel"
+	"context"
 	"errors"
 
 	"gorm.io/gorm"
@@ -21,6 +22,8 @@ type RoomRepository interface {
 	List(f RoomFilter) ([]hotel.Room, int64, error)
 	Update(room *hotel.Room) error
 	Delete(id uint) error
+	GetAll(ctx context.Context) ([]hotel.Room, error)
+	ListPublic(limit int) ([]hotel.Room, error)
 }
 
 type roomRepository struct {
@@ -88,4 +91,34 @@ func (r *roomRepository) Update(room *hotel.Room) error {
 
 func (r *roomRepository) Delete(id uint) error {
 	return r.db.Delete(&hotel.Room{}, id).Error
+}
+
+func (r *roomRepository) GetAll(ctx context.Context) ([]hotel.Room, error) {
+	var rooms []hotel.Room
+	if err := r.db.WithContext(ctx).
+		Where("deleted_at IS NULL").
+		Order("price ASC").
+		Find(&rooms).Error; err != nil {
+		return nil, err
+	}
+	return rooms, nil
+}
+
+
+func (r *roomRepository) ListPublic(limit int) ([]hotel.Room, error) {
+	var rooms []hotel.Room
+
+	q := r.db.Model(&hotel.Room{}).
+		// kalau kamu punya kolom "active" tinggal tambahkan: Where("active = ?", true).
+		Where("deleted_at IS NULL").
+		Order("price ASC")
+
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+
+	if err := q.Find(&rooms).Error; err != nil {
+		return nil, err
+	}
+	return rooms, nil
 }

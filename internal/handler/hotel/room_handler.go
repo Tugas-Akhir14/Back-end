@@ -164,3 +164,12 @@ func (h *RoomHandler) Delete(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "room deleted"})
 }
+
+func (h *RoomHandler) ListPublic(c *gin.Context) {
+    rooms, err := h.service.ListPublic(c.Request.Context())
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+        return
+    }
+    c.JSON(http.StatusOK, gin.H{"data": rooms})
+}

@@ -24,9 +24,7 @@ type newsService struct {
 	repo repohotel.NewsRepository
 }
 
-func NewNewsService(r repohotel.NewsRepository) NewsService {
-	return &newsService{repo: r}
-}
+func NewNewsService(r repohotel.NewsRepository) NewsService { return &newsService{repo: r} }
 
 func slugify(s string) string {
 	s = strings.ToLower(s)
@@ -41,6 +39,14 @@ func saveImage(img *multipart.FileHeader) (string, error) {
 		return "", nil
 	}
 	_ = os.MkdirAll("uploads/news", 0755)
+
+	// cek ekstensi sederhana
+	ext := strings.ToLower(filepath.Ext(img.Filename))
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".webp":
+	default:
+		return "", fmt.Errorf("unsupported image type: %s", ext)
+	}
 
 	filename := fmt.Sprintf("%d-%s", time.Now().Unix(), img.Filename)
 	dst := filepath.Join("uploads/news", filename)
@@ -63,7 +69,7 @@ func saveImage(img *multipart.FileHeader) (string, error) {
 	return dst, nil
 }
 
-func (s *newsService) Create(input hotel.News, img *multipart.FileHeader, creatorID uint) (*hotel		.News, error) {
+func (s *newsService) Create(input hotel.News, img *multipart.FileHeader, creatorID uint) (*hotel.News, error) {
 	input.Slug = slugify(input.Title)
 	input.CreatedBy = &creatorID
 	if strings.ToLower(input.Status) == "published" && input.PublishedAt == nil {
@@ -121,9 +127,9 @@ func (s *newsService) Update(id uint, input hotel.News, img *multipart.FileHeade
 	return existing, nil
 }
 
-func (s *newsService) Delete(id uint) error { return s.repo.Delete(id) }
-func (s *newsService) GetByID(id uint) (*hotel.News, error) { return s.repo.FindByID(id) }
-func (s *newsService) GetBySlug(slug string) (*hotel.News, error) { return s.repo.FindBySlug(slug) }
+func (s *newsService) Delete(id uint) error                           { return s.repo.Delete(id) }
+func (s *newsService) GetByID(id uint) (*hotel.News, error)           { return s.repo.FindByID(id) }
+func (s *newsService) GetBySlug(slug string) (*hotel.News, error)     { return s.repo.FindBySlug(slug) }
 func (s *newsService) List(page, pageSize int, q, status string) ([]hotel.News, int64, error) {
 	return s.repo.FindAll(page, pageSize, q, status)
 }

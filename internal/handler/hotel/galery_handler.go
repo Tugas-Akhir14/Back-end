@@ -95,7 +95,50 @@ func (h *GalleryHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": items, "total": total})
 }
 
-// GET /api/galleries/:id
+// GET /public/galleries (versi publik; default include_global=true, limit<=24)
+func (h *GalleryHandler) ListPublic(c *gin.Context) {
+	var roomIDPtr *uint
+	if v := c.Query("room_id"); v != "" {
+		if rid, err := strconv.Atoi(v); err == nil {
+			u := uint(rid)
+			roomIDPtr = &u
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid room_id"})
+			return
+		}
+	}
+
+	roomType := strings.ToLower(strings.TrimSpace(c.Query("room_type")))
+	if roomType != "" && roomType != "superior" && roomType != "deluxe" && roomType != "executive" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "room_type must be one of: superior|deluxe|executive"})
+		return
+	}
+
+	// Publik default: include global = true biar banner umum ikut tampil
+	includeGlobal := true
+	if q := c.Query("include_global"); q != "" {
+		// tetap hormati jika user sengaja mengubah
+		includeGlobal, _ = strconv.ParseBool(q)
+	}
+
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "12"))
+	if limit <= 0 {
+		limit = 12
+	}
+	if limit > 24 {
+		limit = 24 // rem publik
+	}
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+
+	items, total, err := h.service.List(roomIDPtr, roomType, includeGlobal, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list gallery"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items, "total": total})
+}
+
+// GET /api/galleries/:id  dan /public/galleries/:id
 func (h *GalleryHandler) GetByID(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	item, err := h.service.GetByID(uint(id))
@@ -106,6 +149,42 @@ func (h *GalleryHandler) GetByID(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": item})
 }
 
+// GET /public/rooms/:id/galleries (helper path-parameter)
+func (h *GalleryHandler) ListByRoom(c *gin.Context) {
+	rid, err := strconv.Atoi(c.Param("id"))
+	if err != nil || rid <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid room id"})
+		return
+	}
+	u := uint(rid)
+
+	roomType := strings.ToLower(strings.TrimSpace(c.Query("room_type")))
+	if roomType != "" && roomType != "superior" && roomType != "deluxe" && roomType != "executive" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "room_type must be one of: superior|deluxe|executive"})
+		return
+	}
+
+	includeGlobal := true
+	if q := c.Query("include_global"); q != "" {
+		includeGlobal, _ = strconv.ParseBool(q)
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "12"))
+	if limit <= 0 {
+		limit = 12
+	}
+	if limit > 24 {
+		limit = 24
+	}
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+
+	items, total, err := h.service.List(&u, roomType, includeGlobal, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list gallery"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items, "total": total})
+}
+
 // PUT /api/galleries/:id  (JSON metadata)
 func (h *GalleryHandler) Update(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
@@ -114,6 +193,7 @@ func (h *GalleryHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload: " + err.Error()})
 		return
 	}
+
 	item, err := h.service.Update(uint(id), req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update gallery"})
@@ -133,8 +213,8 @@ func (h *GalleryHandler) UpdateImage(c *gin.Context) {
 
 	file, err := c.FormFile("image")
 	if err != nil {
-	 c.JSON(http.StatusBadRequest, gin.H{"error": "image file is required"})
-	 return
+		c.JSON(http.StatusBadRequest, gin.H{"error": "image file is required"})
+		return
 	}
 
 	newURL, mimeType, size, saveErr := saveImageFile("uploads/gallery", file)
@@ -153,7 +233,7 @@ func (h *GalleryHandler) UpdateImage(c *gin.Context) {
 	item.MimeType = mimeType
 	item.Size = size
 
-	// PENTING: simpan perubahan penuh
+	// simpan perubahan penuh
 	if err := h.service.Save(item); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update image metadata"})
 		return
@@ -161,11 +241,10 @@ func (h *GalleryHandler) UpdateImage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": item})
 }
 
-
 // DELETE /api/galleries/:id
 func (h *GalleryHandler) Delete(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
-	item, _ := h.service.GetByID(uint(id)) // untuk hapus file fisiknya
+	item, _ := h.service.GetByID(uint(id)) // ambil sebelum delete untuk hapus file fisik
 	if err := h.service.Delete(uint(id)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete gallery"})
 		return
@@ -200,7 +279,6 @@ func saveImageFile(dir string, fh *multipart.FileHeader) (string, string, int64,
 	name := fmt.Sprintf("%d_%s%s", time.Now().UnixNano(), slugBase(fh.Filename), ext)
 	dst := filepath.Join(dir, name)
 
-	// simpan manual
 	out, err := os.Create(dst)
 	if err != nil {
 		return "", "", 0, err
