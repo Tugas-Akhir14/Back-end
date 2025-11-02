@@ -1,3 +1,4 @@
+// internal/repository/repohotel/vision_mission_repository.go
 package repohotel
 
 import (
@@ -11,7 +12,11 @@ import (
 )
 
 type VisionMissionRepository interface {
-	Get(ctx context.Context) (*hotel.VisionMission, error)                               // ambil entri aktif (atau entri pertama jika ada)
+	// Entri pertama apa adanya (untuk admin kelola)
+	Get(ctx context.Context) (*hotel.VisionMission, error)
+	// Entri aktif untuk publik
+	GetActive(ctx context.Context) (*hotel.VisionMission, error)
+	// Create/update
 	Upsert(ctx context.Context, payload hotel.UpsertVisionMissionRequest, userID *uint) (*hotel.VisionMission, error)
 }
 
@@ -27,6 +32,23 @@ func (r *visionMissionRepository) Get(ctx context.Context) (*hotel.VisionMission
 	var row hotel.VisionMission
 	tx := r.db.WithContext(ctx).
 		Order("id ASC").
+		Limit(1).
+		Find(&row)
+
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	if tx.RowsAffected == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &row, nil
+}
+
+func (r *visionMissionRepository) GetActive(ctx context.Context) (*hotel.VisionMission, error) {
+	var row hotel.VisionMission
+	tx := r.db.WithContext(ctx).
+		Where("active = ?", true).
+		Order("id DESC").
 		Limit(1).
 		Find(&row)
 

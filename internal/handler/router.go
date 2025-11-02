@@ -3,7 +3,7 @@ package handler
 
 import (
 	"backend/internal/config"
-	"backend/internal/models/auth" 
+	"backend/internal/models/auth"
 	"backend/internal/repository/repohotel"
 	"backend/internal/repository/reposouvenir"
 	"backend/internal/service/serviceauth"
@@ -49,13 +49,13 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 	souvenirProductH := souvenirhandler.NewProductHandler(souvenirservice.NewProductService(reposouvenir.NewProductRepository(db)))
 	souvenirCategoryH := souvenirhandler.NewCategoryHandler(souvenirservice.NewCategoryService(reposouvenir.NewCategoryRepository(db)))
 
-	// FIX: bookProductH butuh 2 argumen (productService + categoryService)
+	// BOOK
 	bookProductRepo := repobook.NewProductRepository(db)
 	bookCategoryRepo := repobook.NewCategoryRepository(db)
 	bookProductService := bookservice.NewProductService(bookProductRepo, bookCategoryRepo)
 	bookProductH := bookhandler.NewProductHandler(bookProductService, bookservice.NewCategoryService(bookCategoryRepo))
 
-	// FIX: cafeProductH butuh 2 argumen
+	// CAFE
 	cafeProductRepo := repocafe.NewProductRepository(db)
 	cafeCategoryRepo := repocafe.NewCategoryRepository(db)
 	cafeProductService := cafeservice.NewProductService(cafeProductRepo, cafeCategoryRepo)
@@ -69,25 +69,28 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 	reviewService := hotelservice.NewReviewService(reviewRepo)
 	reviewH := hotel.NewReviewHandler(reviewService)
 
-	// === PUBLIC API (untuk landing page) ===
+	// === PUBLIC API (landing page) ===
 	public := r.Group("/public")
 	{
 		// Rooms (ringkas untuk landing)
 		public.GET("/rooms", roomH.ListPublic)
 
 		// Galleries (tanpa auth)
-		public.GET("/gallery", galleryH.ListPublic)         
-		public.GET("/gallery/:id", galleryH.GetByID)        
-		public.GET("/rooms/:id/gallery", galleryH.ListByRoom) 
+		public.GET("/gallery", galleryH.ListPublic)
+		public.GET("/gallery/:id", galleryH.GetByID)
+		public.GET("/rooms/:id/gallery", galleryH.ListByRoom)
 
 		// Reviews publik
-		public.POST("/reviews", reviewH.Create)     
-		public.GET("/reviews", reviewH.GetApproved) 
+		public.POST("/reviews", reviewH.Create)
+		public.GET("/reviews", reviewH.GetApproved)
 
 		// News (publik, hanya published)
-		public.GET("/news", newsH.ListPublic)                  // ?page=&page_size=&q=
-		public.GET("/news/:id", newsH.GetPublicByID)           // detail by ID, published only
-		public.GET("/news/slug/:slug", newsH.GetPublicBySlug) 
+		public.GET("/news", newsH.ListPublic)        // ?page=&page_size=&q=
+		public.GET("/news/:id", newsH.GetPublicByID) // detail by ID, published only
+		public.GET("/news/slug/:slug", newsH.GetPublicBySlug)
+
+		// Vision & Mission (publik, hanya yang active)
+		public.GET("/visi-misi", visionMissionH.GetPublic)
 	}
 
 	// === ADMIN API ===
@@ -123,7 +126,9 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 		hotelGroup.PUT("/news/:id", newsH.Update)
 		hotelGroup.DELETE("/news/:id", newsH.Delete)
 
+		// Admin can view and upsert any Vision & Mission (no filter active)
 		hotelGroup.GET("/visi-misi", visionMissionH.Get)
+		// PUT /api/visi-misi
 		hotelGroup.PUT("/visi-misi", visionMissionH.Upsert)
 
 		hotelGroup.GET("/reviews/pending", reviewH.GetPending)

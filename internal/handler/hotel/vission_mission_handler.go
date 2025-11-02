@@ -1,3 +1,4 @@
+// internal/handler/hotel/vision_mission_handler.go
 package hotel
 
 import (
@@ -16,7 +17,8 @@ func NewVisionMissionHandler(s hotelservice.VisionMissionService) *VisionMission
 	return &VisionMissionHandler{svc: s}
 }
 
-// GET /api/visi-misi  (public)
+// GET /api/visi-misi (protected, admin)
+// Mengambil entri pertama tanpa memaksa active=true (untuk pengelolaan di admin)
 func (h *VisionMissionHandler) Get(c *gin.Context) {
 	row, err := h.svc.Get(c.Request.Context())
 	if err != nil {
@@ -26,7 +28,18 @@ func (h *VisionMissionHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": row})
 }
 
-// PUT /api/admin/visi-misi  (protected)
+// GET /public/visi-misi (public)
+// Hanya mengembalikan yang active=true. Jika tidak ada, 404.
+func (h *VisionMissionHandler) GetPublic(c *gin.Context) {
+	row, err := h.svc.GetPublic(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "visi & misi tidak tersedia"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+// PUT /api/visi-misi (protected, admin)
 func (h *VisionMissionHandler) Upsert(c *gin.Context) {
 	var req hotel.UpsertVisionMissionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -34,7 +47,7 @@ func (h *VisionMissionHandler) Upsert(c *gin.Context) {
 		return
 	}
 
-	// Ambil user id dari context (sesuaikan dengan middleware JWT kamu)
+	// Ambil user id dari context (sesuaikan middleware JWT kamu)
 	var uid *uint
 	if v, ok := c.Get("user_id"); ok {
 		if num, ok2 := v.(uint); ok2 {
