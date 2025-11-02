@@ -11,6 +11,7 @@ import (
 type RoomFilter struct {
 	Type   string
 	Query  string
+	Status string // Tambah filter status
 	Limit  int
 	Offset int
 }
@@ -64,8 +65,12 @@ func (r *roomRepository) List(f RoomFilter) ([]hotel.Room, int64, error) {
 		count int64
 		q     = r.db.Model(&hotel.Room{})
 	)
+
 	if f.Type != "" {
 		q = q.Where("type = ?", f.Type)
+	}
+	if f.Status != "" {
+		q = q.Where("status = ?", f.Status)
 	}
 	if f.Query != "" {
 		like := "%" + f.Query + "%"
@@ -104,13 +109,11 @@ func (r *roomRepository) GetAll(ctx context.Context) ([]hotel.Room, error) {
 	return rooms, nil
 }
 
-
 func (r *roomRepository) ListPublic(limit int) ([]hotel.Room, error) {
 	var rooms []hotel.Room
 
 	q := r.db.Model(&hotel.Room{}).
-		// kalau kamu punya kolom "active" tinggal tambahkan: Where("active = ?", true).
-		Where("deleted_at IS NULL").
+		Where("status = ? AND deleted_at IS NULL", hotel.RoomStatusAvailable).
 		Order("price ASC")
 
 	if limit > 0 {

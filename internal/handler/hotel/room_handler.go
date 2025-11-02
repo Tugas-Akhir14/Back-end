@@ -72,7 +72,6 @@ func (h *RoomHandler) Create(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid form-data: %v", err)})
 			return
 		}
-		// Jika ada file, simpan dan set URL absolut
 		if url, err := saveUploaded(c, "image"); err == nil && url != "" {
 			req.Image = url
 		}
@@ -104,19 +103,17 @@ func (h *RoomHandler) GetByID(c *gin.Context) {
 func (h *RoomHandler) List(c *gin.Context) {
 	t := c.Query("type")
 	q := c.Query("q")
-	limit, err := strconv.Atoi(c.DefaultQuery("limit", "10"))
-	if err != nil || limit <= 0 {
+	status := c.Query("status") // Tambah filter status
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	if limit <= 0 || limit > 100 {
 		limit = 10
 	}
-	if limit > 100 { // Batasi maksimum limit
-		limit = 100
-	}
-	offset, err := strconv.Atoi(c.DefaultQuery("offset", "0"))
-	if err != nil || offset < 0 {
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if offset < 0 {
 		offset = 0
 	}
 
-	rooms, total, err := h.service.List(t, q, limit, offset)
+	rooms, total, err := h.service.List(t, q, status, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list rooms: %v", err)})
 		return
@@ -138,9 +135,8 @@ func (h *RoomHandler) Update(c *gin.Context) {
 		return
 	}
 
-	// Jika ada file baru, simpan & set URL absolut
 	if url, err := saveUploaded(c, "image"); err == nil && url != "" {
-		req.Image = &url // Gunakan pointer jika field Image adalah *string
+		req.Image = &url
 	}
 
 	room, err := h.service.Update(uint(id), req)
@@ -166,10 +162,10 @@ func (h *RoomHandler) Delete(c *gin.Context) {
 }
 
 func (h *RoomHandler) ListPublic(c *gin.Context) {
-    rooms, err := h.service.ListPublic(c.Request.Context())
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-        return
-    }
-    c.JSON(http.StatusOK, gin.H{"data": rooms})
+	rooms, err := h.service.ListPublic(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": rooms})
 }

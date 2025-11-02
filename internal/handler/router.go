@@ -69,6 +69,11 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 	reviewService := hotelservice.NewReviewService(reviewRepo)
 	reviewH := hotel.NewReviewHandler(reviewService)
 
+	// === BOOKING ===
+	bookingRepo := repohotel.NewBookingRepository(db)
+	bookingService := hotelservice.NewBookingService(bookingRepo, repohotel.NewRoomRepository(db))
+	bookingH := hotel.NewBookingHandler(bookingService)
+
 	// === PUBLIC API (landing page) ===
 	public := r.Group("/public")
 	{
@@ -91,6 +96,8 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 
 		// Vision & Mission (publik, hanya yang active)
 		public.GET("/visi-misi", visionMissionH.GetPublic)
+
+		public.POST("/bookings", bookingH.Create)
 	}
 
 	// === ADMIN API ===
@@ -134,6 +141,10 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 		hotelGroup.GET("/reviews/pending", reviewH.GetPending)
 		hotelGroup.PUT("/reviews/:id/approve", reviewH.Approve)
 		hotelGroup.DELETE("/reviews/:id", reviewH.Delete)
+
+		hotelGroup.GET("/bookings", bookingH.List)
+		hotelGroup.PATCH("/bookings/:id/confirm", bookingH.Confirm)
+		hotelGroup.PATCH("/bookings/:id/cancel", bookingH.Cancel)
 	}
 
 	// SOUVENIR
