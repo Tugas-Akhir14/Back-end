@@ -1,7 +1,10 @@
 // backend/internal/models/cafe/product.go
 package cafe
 
-import "time"
+import (
+
+	"time"
+)
 
 type ProductCafe struct {
 	ID         uint         `json:"id" gorm:"primaryKey"`
@@ -12,6 +15,7 @@ type ProductCafe struct {
 	Gambar     string       `json:"gambar" gorm:"size:500"`
 	CategoryID uint         `json:"category_id" gorm:"not null"`
 	Category   CategoryCafe `json:"category" gorm:"foreignKey:CategoryID"`
+	
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

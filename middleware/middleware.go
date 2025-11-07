@@ -1,4 +1,3 @@
-// middleware/middleware.go
 package middleware
 
 import (
@@ -72,3 +71,9 @@ func RoleMiddleware(allowed ...auth.Role) gin.HandlerFunc {
 		c.Abort()
 	}
 }
+
+// Optional: Helper untuk cek role di handler
+func GetUserRole(c *gin.Context) auth.Role {
+	roleStr, _ := c.Get("role")
+	return auth.Role(roleStr.(string))
+}	

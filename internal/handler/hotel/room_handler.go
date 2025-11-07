@@ -129,19 +129,39 @@ func (h *RoomHandler) Update(c *gin.Context) {
 		return
 	}
 
+	// PARSING MULTIPART FORM (WAJIB!)
+	if err := c.Request.ParseMultipartForm(10 << 20); err != nil && err != http.ErrNotMultipart {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to parse form data"})
+		return
+	}
+
 	var req hotel.UpdateRoomRequest
 	if err := c.ShouldBind(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid payload: %v", err)})
 		return
 	}
 
-	if url, err := saveUploaded(c, "image"); err == nil && url != "" {
+	// PROSES UPLOAD GAMBAR JIKA ADA
+	if file, err := c.FormFile("image"); err == nil {
+		filename := fmt.Sprintf("%d_%s", time.Now().Unix(), filepath.Base(file.Filename))
+		dir := "uploads/gallery"
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create upload directory"})
+			return
+		}
+		dst := filepath.Join(dir, filename)
+		if err := c.SaveUploadedFile(file, dst); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save image"})
+			return
+		}
+		rel := filepath.ToSlash(dst)
+		url := publicURL(c, rel)
 		req.Image = &url
 	}
 
 	room, err := h.service.Update(uint(id), req)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("failed to update room: %v", err)})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": room})

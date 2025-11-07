@@ -24,6 +24,9 @@ import (
 	"backend/internal/handler/cafehandler"
 	"backend/internal/service/cafeservice"
 	"backend/internal/repository/repocafe"
+
+	// IMPORT ADMIN REPOSITORY DENGAN PATH YANG ANDA TENTUKAN
+	"backend/internal/repository/admin"
 )
 
 func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
@@ -39,6 +42,9 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 	r.GET("/admins/profile", middleware.AuthMiddleware(), adm.GetProfile)
 
 	db := config.GetDB()
+
+	// INISIALISASI ADMIN REPOSITORY (PATH ANDA)
+	adminRepo := admin.NewAdminRepository(db)
 
 	// === REPO & HANDLER ===
 	roomH := hotel.NewRoomHandler(hotelservice.NewRoomService(repohotel.NewRoomRepository(db)))
@@ -64,54 +70,49 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 	bookCategoryH := bookhandler.NewCategoryHandler(bookservice.NewCategoryService(bookCategoryRepo))
 	cafeCategoryH := cafehandler.NewCategoryHandler(cafeservice.NewCategoryService(cafeCategoryRepo))
 
-	// REVIEW HOTEL
+	// REVIEW HOTEL → INJECT adminRepo
 	reviewRepo := repohotel.NewReviewRepository(db)
-	reviewService := hotelservice.NewReviewService(reviewRepo)
+	reviewService := hotelservice.NewReviewService(reviewRepo, adminRepo)
 	reviewH := hotel.NewReviewHandler(reviewService)
 
-	// === BOOKING ===
+	// BOOKING
 	bookingRepo := repohotel.NewBookingRepository(db)
 	bookingService := hotelservice.NewBookingService(bookingRepo, repohotel.NewRoomRepository(db))
 	bookingH := hotel.NewBookingHandler(bookingService)
 
-	// === PUBLIC API (landing page) ===
+	// === PUBLIC API ===
 	public := r.Group("/public")
 	{
-		// Rooms (ringkas untuk landing)
 		public.GET("/rooms", roomH.ListPublic)
-
-		// Galleries (tanpa auth)
 		public.GET("/gallery", galleryH.ListPublic)
 		public.GET("/gallery/:id", galleryH.GetByID)
 		public.GET("/rooms/:id/gallery", galleryH.ListByRoom)
-
-		// Reviews publik
-		public.POST("/reviews", reviewH.Create)
 		public.GET("/reviews", reviewH.GetApproved)
-
-		// News (publik, hanya published)
-		public.GET("/news", newsH.ListPublic)        // ?page=&page_size=&q=
-		public.GET("/news/:id", newsH.GetPublicByID) // detail by ID, published only
+		public.GET("/news", newsH.ListPublic)
+		public.GET("/news/:id", newsH.GetPublicByID)
 		public.GET("/news/slug/:slug", newsH.GetPublicBySlug)
-
-		// Vision & Mission (publik, hanya yang active)
 		public.GET("/visi-misi", visionMissionH.GetPublic)
-
 		public.POST("/bookings", bookingH.Create)
+
+		public.POST("/reviews",
+			middleware.AuthMiddleware(),
+			middleware.RoleMiddleware(auth.RoleGuest),
+			reviewH.Create,
+		)
 	}
 
 	// === ADMIN API ===
-	admin := r.Group("/api", middleware.AuthMiddleware())
+	adminGroup := r.Group("/api", middleware.AuthMiddleware())
 
-	// SUPERADMIN ONLY
-	super := admin.Group("", middleware.RoleMiddleware(auth.RoleSuperAdmin))
+	// SUPERADMIN
+	super := adminGroup.Group("", middleware.RoleMiddleware(auth.RoleSuperAdmin))
 	{
 		super.GET("/pending-admins", adm.GetPending)
 		super.PATCH("/admins/approve/:id", adm.ApproveUser)
 	}
 
 	// HOTEL
-	hotelGroup := admin.Group("", middleware.RoleMiddleware(auth.RoleAdminHotel, auth.RoleSuperAdmin))
+	hotelGroup := adminGroup.Group("", middleware.RoleMiddleware(auth.RoleAdminHotel, auth.RoleSuperAdmin))
 	{
 		hotelGroup.POST("/rooms", roomH.Create)
 		hotelGroup.GET("/rooms", roomH.List)
@@ -120,7 +121,7 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 		hotelGroup.DELETE("/rooms/:id", roomH.Delete)
 
 		hotelGroup.POST("/galleries", galleryH.Create)
-		hotelGroup.GET("/galleries", galleryH.List) // versi admin, bebas param
+		hotelGroup.GET("/galleries", galleryH.List)
 		hotelGroup.GET("/galleries/:id", galleryH.GetByID)
 		hotelGroup.PUT("/galleries/:id", galleryH.Update)
 		hotelGroup.PUT("/galleries/:id/image", galleryH.UpdateImage)
@@ -133,22 +134,19 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 		hotelGroup.PUT("/news/:id", newsH.Update)
 		hotelGroup.DELETE("/news/:id", newsH.Delete)
 
-		// Admin can view and upsert any Vision & Mission (no filter active)
 		hotelGroup.GET("/visi-misi", visionMissionH.Get)
-		// PUT /api/visi-misi
 		hotelGroup.PUT("/visi-misi", visionMissionH.Upsert)
 
 		hotelGroup.GET("/reviews/pending", reviewH.GetPending)
 		hotelGroup.PUT("/reviews/:id/approve", reviewH.Approve)
 		hotelGroup.DELETE("/reviews/:id", reviewH.Delete)
+		hotelGroup.POST("/reviews", reviewH.Create)
 
 		hotelGroup.GET("/bookings", bookingH.List)
-		hotelGroup.PATCH("/bookings/:id/confirm", bookingH.Confirm)
-		hotelGroup.PATCH("/bookings/:id/cancel", bookingH.Cancel)
 	}
 
 	// SOUVENIR
-	souvenirGroup := admin.Group("", middleware.RoleMiddleware(auth.RoleAdminSouvenir, auth.RoleSuperAdmin))
+	souvenirGroup := adminGroup.Group("", middleware.RoleMiddleware(auth.RoleAdminSouvenir, auth.RoleSuperAdmin))
 	{
 		souvenirGroup.POST("/categories", souvenirCategoryH.Create)
 		souvenirGroup.GET("/categories", souvenirCategoryH.GetAll)
@@ -165,7 +163,7 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 	}
 
 	// BOOK
-	bookGroup := admin.Group("", middleware.RoleMiddleware(auth.RoleAdminBuku, auth.RoleSuperAdmin))
+	bookGroup := adminGroup.Group("", middleware.RoleMiddleware(auth.RoleAdminBuku, auth.RoleSuperAdmin))
 	{
 		bookGroup.POST("/book-categories", bookCategoryH.Create)
 		bookGroup.GET("/book-categories", bookCategoryH.GetAll)
@@ -180,7 +178,7 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 	}
 
 	// CAFE
-	cafeGroup := admin.Group("", middleware.RoleMiddleware(auth.RoleAdminCafe, auth.RoleSuperAdmin))
+	cafeGroup := adminGroup.Group("", middleware.RoleMiddleware(auth.RoleAdminCafe, auth.RoleSuperAdmin))
 	{
 		cafeGroup.POST("/cafe-categories", cafeCategoryH.Create)
 		cafeGroup.PUT("/cafe-categories/:id", cafeCategoryH.Update)

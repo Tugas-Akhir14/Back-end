@@ -12,7 +12,7 @@ type ReviewRepository interface {
 	GetPending() ([]hotel.GuestReview, error)
 	Approve(id uint) error
 	Delete(id uint) error
-	CheckRateLimit(ip string, minutes int) (bool, error) // TAMBAH INI
+	CheckRateLimit(ip string, minutes int) (bool, error)
 }
 
 type repo struct {
@@ -23,7 +23,6 @@ func NewReviewRepository(db *gorm.DB) ReviewRepository {
 	return &repo{db}
 }
 
-// TAMBAH METHOD INI
 func (r *repo) CheckRateLimit(ip string, minutes int) (bool, error) {
 	var count int64
 	cutoff := time.Now().Add(-1 * time.Duration(minutes) * time.Minute)
@@ -42,13 +41,21 @@ func (r *repo) Create(review *hotel.GuestReview) error {
 
 func (r *repo) GetApproved() ([]hotel.GuestReview, error) {
 	var reviews []hotel.GuestReview
-	err := r.db.Where("is_approved = ?", true).Order("created_at DESC").Find(&reviews).Error
+	err := r.db.
+		Preload("Admin"). // TAMBAH INI
+		Where("is_approved = ?", true).
+		Order("created_at DESC").
+		Find(&reviews).Error
 	return reviews, err
 }
 
 func (r *repo) GetPending() ([]hotel.GuestReview, error) {
 	var reviews []hotel.GuestReview
-	err := r.db.Where("is_approved = ?", false).Order("created_at DESC").Find(&reviews).Error
+	err := r.db.
+		Preload("Admin"). // TAMBAH INI
+		Where("is_approved = ?", false).
+		Order("created_at DESC").
+		Find(&reviews).Error
 	return reviews, err
 }
 
