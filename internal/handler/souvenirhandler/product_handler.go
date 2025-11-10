@@ -235,3 +235,78 @@ func (h *ProductHandler) GetProductsByCategory(c *gin.Context) {
         "limit": limit,
     })
 }
+
+// ListPublic - tampilkan semua produk souvenir untuk publik
+func (h *ProductHandler) ListPublic(c *gin.Context) {
+    page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+    limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+
+    if page < 1 {
+        page = 1
+    }
+    if limit < 1 || limit > 100 {
+        limit = 10
+    }
+
+    products, total, err := h.service.GetAllProducts(page, limit)
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+        return
+    }
+
+    c.JSON(http.StatusOK, gin.H{
+        "data":  products,
+        "total": total,
+        "page":  page,
+        "limit": limit,
+    })
+}
+
+// GetPublicByID - detail produk souvenir untuk publik
+func (h *ProductHandler) GetPublicByID(c *gin.Context) {
+    id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+    if err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID"})
+        return
+    }
+
+    product, err := h.service.GetProductByID(uint(id))
+    if err != nil {
+        c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
+        return
+    }
+
+    c.JSON(http.StatusOK, gin.H{"data": product})
+}
+
+// GetPublicByCategory - produk berdasarkan kategori untuk publik
+func (h *ProductHandler) GetPublicByCategory(c *gin.Context) {
+    categoryID, err := strconv.ParseUint(c.Param("category_id"), 10, 32)
+    if err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID"})
+        return
+    }
+
+    page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+    limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+
+    if page < 1 {
+        page = 1
+    }
+    if limit < 1 || limit > 100 {
+        limit = 10
+    }
+
+    products, total, err := h.service.GetProductsByCategoryID(uint(categoryID), page, limit)
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+        return
+    }
+
+    c.JSON(http.StatusOK, gin.H{
+        "data":  products,
+        "total": total,
+        "page":  page,
+        "limit": limit,
+    })
+}

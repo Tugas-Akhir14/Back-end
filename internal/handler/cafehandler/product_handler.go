@@ -171,3 +171,50 @@ func (h *ProductHandler) uploadImageFromFile(c *gin.Context, file *multipart.Fil
     }
     return "/uploads/" + filename, nil
 }
+
+func (h *ProductHandler) ListPublic(c *gin.Context) {
+	var categoryID *uint
+	if idStr := c.Query("category_id"); idStr != "" {
+		if id, err := strconv.ParseUint(idStr, 10, 32); err == nil {
+			uid := uint(id)
+			categoryID = &uid
+		}
+	}
+
+	products, err := h.productService.GetAll(categoryID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, products)
+}
+
+func (h *ProductHandler) GetPublicByID(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+	product, err := h.productService.GetByID(uint(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
+		return
+	}
+	c.JSON(http.StatusOK, product)
+}
+
+func (h *ProductHandler) GetPublicByCategory(c *gin.Context) {
+	idStr := c.Param("category_id")
+	if idStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "category_id is required"})
+		return
+	}
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid category_id"})
+		return
+	}
+	categoryID := uint(id)
+	products, err := h.productService.GetAll(&categoryID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, products)
+}

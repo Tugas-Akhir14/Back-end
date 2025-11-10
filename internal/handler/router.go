@@ -93,12 +93,24 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 		public.GET("/news/slug/:slug", newsH.GetPublicBySlug)
 		public.GET("/visi-misi", visionMissionH.GetPublic)
 		public.POST("/bookings", bookingH.Create)
-
 		public.POST("/reviews",
 			middleware.AuthMiddleware(),
 			middleware.RoleMiddleware(auth.RoleGuest),
 			reviewH.Create,
 		)
+		public.GET("/souvenirs", souvenirProductH.ListPublic)
+		public.GET("/souvenirs/:id", souvenirProductH.GetPublicByID)
+		public.GET("/souvenirs/category/:category_id", souvenirProductH.GetPublicByCategory)
+
+
+		public.GET("/books", bookProductH.ListPublic)
+		public.GET("/books/:id", bookProductH.GetPublicByID) // opsional: tambah GetPublicByID
+		public.GET("/books/category/:category_id", bookProductH.GetPublicByCategory) // opsional
+
+		public.GET("/cafe", cafeProductH.ListPublic)                     // list semua
+    	public.GET("/cafe/:id", cafeProductH.GetPublicByID)             // detail
+    	public.GET("/cafe/category/:category_id", cafeProductH.GetPublicByCategory) // by category
+
 	}
 
 	// === ADMIN API ===
