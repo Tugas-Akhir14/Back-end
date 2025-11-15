@@ -1,30 +1,27 @@
+// internal/repository/repohotel/room_repository.go
 package repohotel
 
 import (
 	"backend/internal/models/hotel"
-	"context"
-	"errors"
-
 	"gorm.io/gorm"
 )
+
+type RoomRepository interface {
+	Create(r *hotel.Room) error
+	FindByID(id uint) (*hotel.Room, error)
+	FindByNumber(num string) (*hotel.Room, error)
+	List(f RoomFilter) ([]hotel.Room, int64, error)
+	ListPublic(limit int) ([]hotel.Room, error)
+	Update(r *hotel.Room) error
+	Delete(id uint) error
+}
 
 type RoomFilter struct {
 	Type   string
 	Query  string
-	Status string // Tambah filter status
+	Status string
 	Limit  int
 	Offset int
-}
-
-type RoomRepository interface {
-	Create(room *hotel.Room) error
-	FindByID(id uint) (*hotel.Room, error)
-	FindByNumber(number string) (*hotel.Room, error)
-	List(f RoomFilter) ([]hotel.Room, int64, error)
-	Update(room *hotel.Room) error
-	Delete(id uint) error
-	GetAll(ctx context.Context) ([]hotel.Room, error)
-	ListPublic(limit int) ([]hotel.Room, error)
 }
 
 type roomRepository struct {
@@ -41,53 +38,64 @@ func (r *roomRepository) Create(room *hotel.Room) error {
 
 func (r *roomRepository) FindByID(id uint) (*hotel.Room, error) {
 	var room hotel.Room
-	if err := r.db.First(&room, id).Error; err != nil {
+	if err := r.db.Preload("RoomType").First(&room, id).Error; err != nil {
 		return nil, err
 	}
 	return &room, nil
 }
 
-func (r *roomRepository) FindByNumber(number string) (*hotel.Room, error) {
+func (r *roomRepository) FindByNumber(num string) (*hotel.Room, error) {
 	var room hotel.Room
-	err := r.db.Where("number = ?", number).First(&room).Error
+	err := r.db.Preload("RoomType").Where("number = ?", num).First(&room).Error
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
 		return nil, err
 	}
 	return &room, nil
 }
 
 func (r *roomRepository) List(f RoomFilter) ([]hotel.Room, int64, error) {
-	var (
-		rooms []hotel.Room
-		count int64
-		q     = r.db.Model(&hotel.Room{})
-	)
+	var rooms []hotel.Room
+	var total int64
 
+	query := r.db.Model(&hotel.Room{}).Preload("RoomType")
 	if f.Type != "" {
-		q = q.Where("type = ?", f.Type)
-	}
-	if f.Status != "" {
-		q = q.Where("status = ?", f.Status)
+		query = query.Joins("JOIN room_types ON room_types.id = rooms.room_type_id").
+			Where("room_types.type = ?", f.Type)
 	}
 	if f.Query != "" {
-		like := "%" + f.Query + "%"
-		q = q.Where("number LIKE ? OR description LIKE ?", like, like)
+		query = query.Where("rooms.number LIKE ?", "%"+f.Query+"%")
 	}
-	q.Count(&count)
+	if f.Status != "" {
+		query = query.Where("rooms.status = ?", f.Status)
+	}
 
-	if f.Limit <= 0 {
-		f.Limit = 10
-	}
-	if f.Offset < 0 {
-		f.Offset = 0
-	}
-	if err := q.Order("id DESC").Limit(f.Limit).Offset(f.Offset).Find(&rooms).Error; err != nil {
+	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	return rooms, count, nil
+
+	if f.Limit > 0 {
+		query = query.Limit(f.Limit)
+	}
+	if f.Offset > 0 {
+		query = query.Offset(f.Offset)
+	}
+
+	if err := query.Find(&rooms).Error; err != nil {
+		return nil, 0, err
+	}
+	return rooms, total, nil
+}
+
+func (r *roomRepository) ListPublic(limit int) ([]hotel.Room, error) {
+	var rooms []hotel.Room
+	query := r.db.Preload("RoomType").Where("status = ?", hotel.RoomStatusAvailable)
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if err := query.Find(&rooms).Error; err != nil {
+		return nil, err
+	}
+	return rooms, nil
 }
 
 func (r *roomRepository) Update(room *hotel.Room) error {
@@ -96,32 +104,4 @@ func (r *roomRepository) Update(room *hotel.Room) error {
 
 func (r *roomRepository) Delete(id uint) error {
 	return r.db.Delete(&hotel.Room{}, id).Error
-}
-
-func (r *roomRepository) GetAll(ctx context.Context) ([]hotel.Room, error) {
-	var rooms []hotel.Room
-	if err := r.db.WithContext(ctx).
-		Where("deleted_at IS NULL").
-		Order("price ASC").
-		Find(&rooms).Error; err != nil {
-		return nil, err
-	}
-	return rooms, nil
-}
-
-func (r *roomRepository) ListPublic(limit int) ([]hotel.Room, error) {
-	var rooms []hotel.Room
-
-	q := r.db.Model(&hotel.Room{}).
-		Where("status = ? AND deleted_at IS NULL", hotel.RoomStatusAvailable).
-		Order("price ASC")
-
-	if limit > 0 {
-		q = q.Limit(limit)
-	}
-
-	if err := q.Find(&rooms).Error; err != nil {
-		return nil, err
-	}
-	return rooms, nil
 }

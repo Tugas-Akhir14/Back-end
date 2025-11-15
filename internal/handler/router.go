@@ -2,7 +2,6 @@
 package handler
 
 import (
-	"backend/internal/config"
 	"backend/internal/models/auth"
 	"backend/internal/repository/repohotel"
 	"backend/internal/repository/reposouvenir"
@@ -25,11 +24,12 @@ import (
 	"backend/internal/service/cafeservice"
 	"backend/internal/repository/repocafe"
 
-	// IMPORT ADMIN REPOSITORY DENGAN PATH YANG ANDA TENTUKAN
 	"backend/internal/repository/admin"
+	"gorm.io/gorm"
 )
 
-func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
+// TAMBAH PARAMETER db
+func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.DB) {
 	r.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "route not found"})
 	})
@@ -41,13 +41,10 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 	r.POST("/admins/login", adm.Login)
 	r.GET("/admins/profile", middleware.AuthMiddleware(), adm.GetProfile)
 
-	db := config.GetDB()
-
-	// INISIALISASI ADMIN REPOSITORY (PATH ANDA)
+	// INISIALISASI ADMIN REPOSITORY
 	adminRepo := admin.NewAdminRepository(db)
 
 	// === REPO & HANDLER ===
-	roomH := hotel.NewRoomHandler(hotelservice.NewRoomService(repohotel.NewRoomRepository(db)))
 	galleryH := hotel.NewGalleryHandler(hotelservice.NewGalleryService(repohotel.NewGalleryRepository(db)))
 	newsH := hotel.NewNewsHandler(hotelservice.NewNewsService(repohotel.NewNewsRepository(db)))
 	visionMissionH := hotel.NewVisionMissionHandler(hotelservice.NewVisionMissionService(repohotel.NewVisionMissionRepository(db)))
@@ -70,16 +67,26 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 	bookCategoryH := bookhandler.NewCategoryHandler(bookservice.NewCategoryService(bookCategoryRepo))
 	cafeCategoryH := cafehandler.NewCategoryHandler(cafeservice.NewCategoryService(cafeCategoryRepo))
 
-	// REVIEW HOTEL → INJECT adminRepo
+	// REVIEW HOTEL
 	reviewRepo := repohotel.NewReviewRepository(db)
 	reviewService := hotelservice.NewReviewService(reviewRepo, adminRepo)
 	reviewH := hotel.NewReviewHandler(reviewService)
 
-	// BOOKING
+	// BOOKING → PASS db
 	bookingRepo := repohotel.NewBookingRepository(db)
-	bookingService := hotelservice.NewBookingService(bookingRepo, repohotel.NewRoomRepository(db))
+	bookingService := hotelservice.NewBookingService(bookingRepo, repohotel.NewRoomRepository(db), db)
 	bookingH := hotel.NewBookingHandler(bookingService)
 
+
+		// Di dalam SetupRoutes
+	roomRepo := repohotel.NewRoomRepository(db)
+	roomTypeRepo := repohotel.NewRoomTypeRepository(db)
+
+	roomService := hotelservice.NewRoomService(roomRepo, roomTypeRepo, db)
+	roomTypeService := hotelservice.NewRoomTypeService(roomTypeRepo)
+
+	roomH := hotel.NewRoomHandler(roomService)
+	roomTypeH := hotel.NewRoomTypeHandler(roomTypeService)
 	// === PUBLIC API ===
 	public := r.Group("/public")
 	{
@@ -92,25 +99,26 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 		public.GET("/news/:id", newsH.GetPublicByID)
 		public.GET("/news/slug/:slug", newsH.GetPublicBySlug)
 		public.GET("/visi-misi", visionMissionH.GetPublic)
-		public.POST("/bookings", bookingH.Create)
-		public.POST("/reviews",
-			middleware.AuthMiddleware(),
-			middleware.RoleMiddleware(auth.RoleGuest),
-			reviewH.Create,
-		)
+		public.POST("/reviews", middleware.AuthMiddleware(), middleware.RoleMiddleware(auth.RoleGuest), reviewH.Create)
+
+		// FITUR BARU
+	
+
 		public.GET("/souvenirs", souvenirProductH.ListPublic)
 		public.GET("/souvenirs/:id", souvenirProductH.GetPublicByID)
 		public.GET("/souvenirs/category/:category_id", souvenirProductH.GetPublicByCategory)
 
-
 		public.GET("/books", bookProductH.ListPublic)
-		public.GET("/books/:id", bookProductH.GetPublicByID) // opsional: tambah GetPublicByID
-		public.GET("/books/category/:category_id", bookProductH.GetPublicByCategory) // opsional
+		public.GET("/books/:id", bookProductH.GetPublicByID)
+		public.GET("/books/category/:category_id", bookProductH.GetPublicByCategory)
 
-		public.GET("/cafe", cafeProductH.ListPublic)                     // list semua
-    	public.GET("/cafe/:id", cafeProductH.GetPublicByID)             // detail
-    	public.GET("/cafe/category/:category_id", cafeProductH.GetPublicByCategory) // by category
+		public.GET("/cafe", cafeProductH.ListPublic)
+		public.GET("/cafe/:id", cafeProductH.GetPublicByID)
+		public.GET("/cafe/category/:category_id", cafeProductH.GetPublicByCategory)
 
+		public.POST("/bookings", middleware.AuthMiddleware(), middleware.RoleMiddleware(auth.RoleGuest), bookingH.Create)
+		public.POST("/guest-bookings", middleware.AuthMiddleware(), middleware.RoleMiddleware(auth.RoleGuest), bookingH.GuestBook)
+		public.GET("/availability", bookingH.CheckAvailability)
 	}
 
 	// === ADMIN API ===
@@ -126,11 +134,19 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 	// HOTEL
 	hotelGroup := adminGroup.Group("", middleware.RoleMiddleware(auth.RoleAdminHotel, auth.RoleSuperAdmin))
 	{
+			// Room CRUD
 		hotelGroup.POST("/rooms", roomH.Create)
 		hotelGroup.GET("/rooms", roomH.List)
 		hotelGroup.GET("/rooms/:id", roomH.GetByID)
 		hotelGroup.PUT("/rooms/:id", roomH.Update)
 		hotelGroup.DELETE("/rooms/:id", roomH.Delete)
+
+		// RoomType CRUD
+		hotelGroup.POST("/room-types", roomTypeH.Create)
+		hotelGroup.GET("/room-types", roomTypeH.List)
+		hotelGroup.GET("/room-types/:id", roomTypeH.GetByID)
+		hotelGroup.PUT("/room-types/:id", roomTypeH.Update)
+		hotelGroup.DELETE("/room-types/:id", roomTypeH.Delete)
 
 		hotelGroup.POST("/galleries", galleryH.Create)
 		hotelGroup.GET("/galleries", galleryH.List)
@@ -154,9 +170,13 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService) {
 		hotelGroup.DELETE("/reviews/:id", reviewH.Delete)
 		hotelGroup.POST("/reviews", reviewH.Create)
 
+		// Admin
 		hotelGroup.GET("/bookings", bookingH.List)
+		hotelGroup.PATCH("/bookings/:id/confirm", bookingH.Confirm)
+		hotelGroup.PATCH("/bookings/:id/cancel", bookingH.Cancel)
 	}
 
+	
 	// SOUVENIR
 	souvenirGroup := adminGroup.Group("", middleware.RoleMiddleware(auth.RoleAdminSouvenir, auth.RoleSuperAdmin))
 	{
