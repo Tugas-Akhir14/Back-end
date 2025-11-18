@@ -2,9 +2,11 @@
 package repohotel
 
 import (
+	"database/sql"
 	"time"
 
 	"backend/internal/models/hotel"
+
 	"gorm.io/gorm"
 )
 
@@ -85,16 +87,28 @@ func (r *bookingRepository) Update(booking *hotel.Booking) error {
 	return r.db.Save(booking).Error
 }
 
+
 func (r *bookingRepository) CountOverlapping(roomID uint, checkIn, checkOut time.Time, excludeID *uint) (int64, error) {
 	var count int64
 
 	query := r.db.Model(&hotel.Booking{}).
 		Where("room_id = ?", roomID).
 		Where("status IN ?", []string{
+			string(hotel.BookingStatusPending),
 			string(hotel.BookingStatusConfirmed),
 			string(hotel.BookingStatusCheckedIn),
 		}).
-		Where("check_in < ? AND check_out > ?", checkOut, checkIn)
+		Where(`(
+			(check_in < ?  AND check_out > ?)  OR  -- booking lama nge-cover baru
+			(check_in < ?  AND check_out > ?)  OR  -- baru nge-cover booking lama
+			(check_in >= ? AND check_out <= ?) OR  -- baru di dalam booking lama
+			(check_in <= ? AND check_out >= ?)     -- booking lama di dalam baru ← FIXED!
+		)`, 
+			checkOut, checkIn,   
+			checkIn,  checkOut,  
+			checkIn,  checkOut,  
+			checkIn,  checkOut,  
+		)
 
 	if excludeID != nil {
 		query = query.Where("id != ?", *excludeID)
@@ -103,57 +117,64 @@ func (r *bookingRepository) CountOverlapping(roomID uint, checkIn, checkOut time
 	err := query.Count(&count).Error
 	return count, err
 }
-
 // internal/repository/repohotel/booking_repository.go
 
+
 func (r *bookingRepository) CheckAvailability(checkIn, checkOut time.Time, roomTypeFilter string) ([]hotel.AvailabilityResponse, error) {
-    var results []hotel.AvailabilityResponse
+	var results []hotel.AvailabilityResponse
 
-    query := r.db.Table("room_types rt").
-        Joins("JOIN rooms ON rooms.room_type_id = rt.id AND rooms.deleted_at IS NULL AND rooms.status = ?", string(hotel.RoomStatusAvailable)).
-        Joins(`LEFT JOIN bookings ON bookings.room_id = rooms.id 
-               AND bookings.check_in < ? 
-               AND bookings.check_out > ? 
-               AND bookings.status IN ?`,
-            checkOut, checkIn,
-            []string{string(hotel.BookingStatusConfirmed), string(hotel.BookingStatusCheckedIn)},
-        ).
-        Where("rooms.deleted_at IS NULL")
+	bookedSubq := r.db.Model(&hotel.Booking{}).
+		Select("DISTINCT room_id").
+		Where("status IN ?", []string{
+			string(hotel.BookingStatusPending),
+			string(hotel.BookingStatusConfirmed),
+			string(hotel.BookingStatusCheckedIn),
+		}).
+		Where(`(
+			check_in < ? AND check_out > ? OR
+			check_in < ? AND check_out > ? OR
+			check_in >= ? AND check_out <= ? OR
+			check_in <= ? AND check_out >= ?
+		)`, checkOut, checkIn, checkIn, checkOut, checkIn, checkOut, checkIn, checkOut) // ← FIXED!
 
-    if roomTypeFilter != "" {
-        query = query.Where("rt.type = ?", roomTypeFilter)
-    }
+	query := r.db.Table("room_types rt").
+		Joins("JOIN rooms ON rooms.room_type_id = rt.id AND rooms.deleted_at IS NULL").
+		// HAPUS FILTER STATUS → karena kita tidak pakai status "booked"
+		// Where("rooms.status IN ...") → dihapus saja
+		Joins("LEFT JOIN (?) booked ON booked.room_id = rooms.id", bookedSubq)
 
-    query = query.
-        Select(`
-            rt.type,
-            rt.price AS price_per_night,  -- INI YANG DIPERBAIKI
-            COUNT(DISTINCT rooms.id) AS total_rooms,
-            COUNT(DISTINCT bookings.id) AS booked_rooms
-        `).
-        Group("rt.id, rt.type, rt.price")
+	if roomTypeFilter != "" {
+		query = query.Where("rt.type = ?", roomTypeFilter)
+	}
 
-    rows, err := query.Rows()
-    if err != nil {
-        return nil, err
-    }
-    defer rows.Close()
+	query = query.Select(`
+		rt.type,
+		rt.price AS price_per_night,
+		COUNT(rooms.id) AS total_rooms,
+		COALESCE(COUNT(booked.room_id), 0) AS booked_rooms
+	`).Group("rt.id, rt.type, rt.price")
 
-    for rows.Next() {
-        var res hotel.AvailabilityResponse
-        var total, booked int64
-        if err := rows.Scan(&res.Type, &res.PricePerNight, &total, &booked); err != nil {
-            return nil, err
-        }
-        res.TotalRooms = int(total)
-        res.AvailableRooms = int(total - booked)
-        if res.AvailableRooms < 0 {
-            res.AvailableRooms = 0
-        }
-        results = append(results, res)
-    }
+	rows, err := query.Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 
-    return results, nil
+	for rows.Next() {
+		var res hotel.AvailabilityResponse
+		var total, booked sql.NullInt64
+		if err := rows.Scan(&res.Type, &res.PricePerNight, &total, &booked); err != nil {
+			return nil, err
+		}
+		res.TotalRooms = int(total.Int64)
+		res.AvailableRooms = int(total.Int64 - booked.Int64)
+		if res.AvailableRooms < 0 {
+			res.AvailableRooms = 0
+		}
+		results = append(results, res)
+	}
+
+	return results, nil
 }
 
 func (r *bookingRepository) FindBookingsByDateRange(checkIn, checkOut time.Time) ([]hotel.Booking, error) {

@@ -61,13 +61,13 @@ func (r *galleryRepository) List(f GalleryFilter) ([]hotel.Gallery, int64, error
 		}
 	}
 
-	// COUNT pada session terpisah agar SELECT/DISTINCT tidak menempel ke query utama
-	qCount := q.Session(&gorm.Session{}) // clone
+	
+	qCount := q.Session(&gorm.Session{}) 
 	if err := qCount.Select("DISTINCT galleries.id").Count(&count).Error; err != nil {
 		return nil, 0, err
 	}
 
-	// Paging default
+	
 	if f.Limit <= 0 {
 		f.Limit = 12
 	}
