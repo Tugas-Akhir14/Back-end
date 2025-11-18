@@ -34,7 +34,7 @@ func main() {
 	if err := db.AutoMigrate(
 		&auth.Admin{},&hotel.RoomType{},
 		&hotel.Room{}, &hotel.Gallery{}, &hotel.News{}, &hotel.VisionMission{},
-		&souvenir.Product{}, &souvenir.Category{},
+		&souvenir.Product{}, &souvenir.Category{},&hotel.GuestReview{},
 		&book.ProductBook{}, &book.CategoryBook{},
 		&cafe.ProductCafe{}, &cafe.CategoryCafe{},
 		&hotel.GuestReview{}, &hotel.Booking{},
@@ -48,6 +48,7 @@ func main() {
 		db.Exec("ALTER TABLE bookings ADD CONSTRAINT fk_bookings_user FOREIGN KEY (user_id) REFERENCES admins(id)")
 		log.Println("Kolom user_id ditambahkan ke tabel bookings")
 	}
+
 
 	seedSuperAdmin(db)
 

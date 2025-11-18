@@ -138,9 +138,7 @@ func (r *bookingRepository) CheckAvailability(checkIn, checkOut time.Time, roomT
 		)`, checkOut, checkIn, checkIn, checkOut, checkIn, checkOut, checkIn, checkOut) // ← FIXED!
 
 	query := r.db.Table("room_types rt").
-		Joins("JOIN rooms ON rooms.room_type_id = rt.id AND rooms.deleted_at IS NULL").
-		// HAPUS FILTER STATUS → karena kita tidak pakai status "booked"
-		// Where("rooms.status IN ...") → dihapus saja
+		Joins("JOIN rooms ON rooms.room_type_id = rt.id AND rooms.deleted_at IS NULL").			
 		Joins("LEFT JOIN (?) booked ON booked.room_id = rooms.id", bookedSubq)
 
 	if roomTypeFilter != "" {
