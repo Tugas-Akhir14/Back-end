@@ -13,7 +13,7 @@ type ReviewRepository interface {
 	GetByUserID(userID uint) ([]hotel.GuestReview, error)
 	Update(review *hotel.GuestReview) error
 	Delete(id uint) error
-	HasUserReviewed(userID uint) (bool, error) // BARU: cek apakah user sudah pernah review
+	HasUserReviewed(userID uint) (bool, error) 
 }
 
 type repo struct {

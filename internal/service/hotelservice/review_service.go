@@ -23,7 +23,7 @@ type ReviewService interface {
     GetAll() ([]hotel.GuestReview, error)
     GetMyReviews(userID uint) ([]hotel.GuestReview, error)
     Update(id uint, input UpdateReviewInput, userID uint) error
-    Delete(id uint, userID uint, isAdmin bool) error // isAdmin = true jika admin yang hapus
+    Delete(id uint, userID uint, isAdmin bool) error 
 }
 
 type reviewService struct {
