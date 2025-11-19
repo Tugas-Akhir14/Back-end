@@ -24,7 +24,6 @@ import (
 	"backend/internal/service/cafeservice"
 	"backend/internal/repository/repocafe"
 
-	"backend/internal/repository/admin"
 	"gorm.io/gorm"
 )
 
@@ -41,8 +40,7 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 	r.POST("/admins/login", adm.Login)
 	r.GET("/admins/profile", middleware.AuthMiddleware(), adm.GetProfile)
 
-	// INISIALISASI ADMIN REPOSITORY
-	adminRepo := admin.NewAdminRepository(db)
+	
 
 	// === REPO & HANDLER ===
 	galleryH := hotel.NewGalleryHandler(hotelservice.NewGalleryService(repohotel.NewGalleryRepository(db)))
@@ -69,7 +67,7 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 
 	// REVIEW HOTEL
 	reviewRepo := repohotel.NewReviewRepository(db)
-	reviewService := hotelservice.NewReviewService(reviewRepo, adminRepo)
+	reviewService := hotelservice.NewReviewService(reviewRepo)
 	reviewH := hotel.NewReviewHandler(reviewService)
 
 	// BOOKING → PASS db
@@ -94,13 +92,17 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 		public.GET("/gallery", galleryH.ListPublic)
 		public.GET("/gallery/:id", galleryH.GetByID)
 		public.GET("/rooms/:id/gallery", galleryH.ListByRoom)
-		public.GET("/reviews", reviewH.GetApproved)
+		
 		public.GET("/news", newsH.ListPublic)
 		public.GET("/news/:id", newsH.GetPublicByID)
 		public.GET("/news/slug/:slug", newsH.GetPublicBySlug)
-		public.GET("/visi-misi", visionMissionH.GetPublic)
-		public.POST("/reviews", middleware.AuthMiddleware(), middleware.RoleMiddleware(auth.RoleGuest), reviewH.Create)
-
+		public.GET("/visi-misi", visionMissionH.GetPublic)		
+		
+		public.GET("/reviews", reviewH.GetAll)
+        public.POST("/reviews", middleware.AuthMiddleware(), middleware.RoleMiddleware(auth.RoleGuest), reviewH.Create)
+        public.GET("/reviews/me", middleware.AuthMiddleware(), middleware.RoleMiddleware(auth.RoleGuest), reviewH.GetMyReviews)
+        public.PUT("/reviews/:id", middleware.AuthMiddleware(), middleware.RoleMiddleware(auth.RoleGuest), reviewH.Update)
+        public.DELETE("/reviews/:id", middleware.AuthMiddleware(), reviewH.Delete)
 		// FITUR BARU
 	
 
@@ -165,11 +167,8 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 		hotelGroup.GET("/visi-misi", visionMissionH.Get)
 		hotelGroup.PUT("/visi-misi", visionMissionH.Upsert)
 
-		hotelGroup.GET("/reviews/pending", reviewH.GetPending)
-		hotelGroup.PUT("/reviews/:id/approve", reviewH.Approve)
-		hotelGroup.DELETE("/reviews/:id", reviewH.Delete)
-		hotelGroup.POST("/reviews", reviewH.Create)
-
+		hotelGroup.GET("/reviews", reviewH.GetAll)        
+    	hotelGroup.DELETE("/reviews/:id", reviewH.Delete) 
 		// Admin
 		hotelGroup.GET("/bookings", bookingH.List)
 		hotelGroup.PATCH("/bookings/:id/confirm", bookingH.Confirm)

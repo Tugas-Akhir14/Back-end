@@ -1,83 +1,104 @@
 package hotelservice
 
 import (
-	"backend/internal/models/auth"
-	"backend/internal/models/hotel"
-	"backend/internal/repository/repohotel"
-	"backend/internal/repository/admin" // GUNAKAN YANG SUDAH ADA
-	"fmt"
+    "errors"
+    "time"
+    "backend/internal/models/hotel"
+    "backend/internal/repository/repohotel"
 )
 
+type CreateReviewInput struct {
+    Rating    int
+    Comment   string
+    GuestName string
+}
+
+type UpdateReviewInput struct {
+    Rating  *int
+    Comment *string
+}
+
 type ReviewService interface {
-	Create(input CreateInput, ip string, adminID uint) error
-	GetApproved() ([]hotel.GuestReview, error)
-	GetPending() ([]hotel.GuestReview, error)
-	Approve(id uint) error
-	Delete(id uint) error
+    Create(input CreateReviewInput, ip string, userID uint) error
+    GetAll() ([]hotel.GuestReview, error)
+    GetMyReviews(userID uint) ([]hotel.GuestReview, error)
+    Update(id uint, input UpdateReviewInput, userID uint) error
+    Delete(id uint, userID uint, isAdmin bool) error // isAdmin = true jika admin yang hapus
 }
 
-type service struct {
-	reviewRepo repohotel.ReviewRepository
-	adminRepo  admin.AdminRepository // GUNAKAN YANG SUDAH ADA
+type reviewService struct {
+    repo repohotel.ReviewRepository
 }
 
-type CreateInput struct {
-	Rating    int
-	Comment   string
-	GuestName string
+func NewReviewService(repo repohotel.ReviewRepository) ReviewService {
+    return &reviewService{repo}
 }
 
-func NewReviewService(reviewRepo repohotel.ReviewRepository, adminRepo admin.AdminRepository) ReviewService {
-	return &service{
-		reviewRepo: reviewRepo,
-		adminRepo:  adminRepo,
-	}
-}
-
-func (s *service) Create(input CreateInput, ip string, adminID uint) error {
-	// Validasi role via adminRepo
-	adminData, err := s.adminRepo.FindByID(adminID)
-	if err != nil {
-		return fmt.Errorf("gagal memeriksa user: %v", err)
-	}
-	if adminData == nil {
-		return fmt.Errorf("user tidak ditemukan")
-	}
-	if adminData.Role != auth.RoleGuest {
-		return fmt.Errorf("hanya role guest yang dapat mengirim ulasan")
-	}
-
-	limited, err := s.reviewRepo.CheckRateLimit(ip, 3)
+func (s *reviewService) Create(input CreateReviewInput, ip string, userID uint) error {
+	hasReviewed, err := s.repo.HasUserReviewed(userID)
 	if err != nil {
 		return err
 	}
-	if limited {
-		return fmt.Errorf("rate limit exceeded")
+	if hasReviewed {
+		return errors.New("Anda hanya diperbolehkan mengirim satu ulasan saja")
 	}
 
-	rev := &hotel.GuestReview{
-		Rating:     input.Rating,
-		Comment:    input.Comment,
-		GuestName:  input.GuestName,
-		IPAddress:  ip,
-		IsApproved: false,
-		AdminID:    adminID,
+	// Validasi rating
+	if input.Rating < 1 || input.Rating > 5 {
+		return errors.New("rating harus antara 1 sampai 5")
 	}
-	return s.reviewRepo.Create(rev)
+
+	review := &hotel.GuestReview{
+		Rating:    input.Rating,
+		Comment:   input.Comment,
+		GuestName: input.GuestName,
+		IPAddress: ip,
+		AdminID:   userID,
+	}
+
+	return s.repo.Create(review)
 }
 
-func (s *service) GetApproved() ([]hotel.GuestReview, error) {
-	return s.reviewRepo.GetApproved()
+func (s *reviewService) GetAll() ([]hotel.GuestReview, error) {
+    return s.repo.GetAll()
 }
 
-func (s *service) GetPending() ([]hotel.GuestReview, error) {
-	return s.reviewRepo.GetPending()
+func (s *reviewService) GetMyReviews(userID uint) ([]hotel.GuestReview, error) {
+    return s.repo.GetByUserID(userID)
 }
 
-func (s *service) Approve(id uint) error {
-	return s.reviewRepo.Approve(id)
+func (s *reviewService) Update(id uint, input UpdateReviewInput, userID uint) error {
+    review, err := s.repo.GetByID(id)
+    if err != nil {
+        return errors.New("ulasan tidak ditemukan")
+    }
+    if review.AdminID != userID {
+        return errors.New("bukan pemilik ulasan")
+    }
+    // Maksimal edit 24 jam setelah dibuat
+    if time.Since(review.CreatedAt) > 24*time.Hour {
+        return errors.New("ulasan hanya bisa diedit dalam 24 jam")
+    }
+
+    if input.Rating != nil {
+        review.Rating = *input.Rating
+    }
+    if input.Comment != nil {
+        review.Comment = *input.Comment
+    }
+
+    return s.repo.Update(review)
 }
 
-func (s *service) Delete(id uint) error {
-	return s.reviewRepo.Delete(id)
+func (s *reviewService) Delete(id uint, userID uint, isAdmin bool) error {
+    review, err := s.repo.GetByID(id)
+    if err != nil {
+        return errors.New("ulasan tidak ditemukan")
+    }
+
+    if !isAdmin && review.AdminID != userID {
+        return errors.New("bukan pemilik ulasan")
+    }
+
+    return s.repo.Delete(id)
 }
