@@ -173,6 +173,7 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 		hotelGroup.GET("/bookings", bookingH.List)
 		hotelGroup.PATCH("/bookings/:id/confirm", bookingH.Confirm)
 		hotelGroup.PATCH("/bookings/:id/cancel", bookingH.Cancel)
+		hotelGroup.PATCH("/bookings/:id/status", bookingH.UpdateStatus)
 	}
 
 	

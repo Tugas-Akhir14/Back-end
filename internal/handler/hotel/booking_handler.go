@@ -199,3 +199,62 @@ func (h *BookingHandler) notFound(c *gin.Context, msg string) {
 func (h *BookingHandler) internalError(c *gin.Context, msg string) {
 	c.JSON(http.StatusInternalServerError, response{Error: "internal server error: " + msg})
 }
+
+
+func (h *BookingHandler) Update(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		h.unauthorized(c, "user not authenticated")
+		return
+	}
+	uid := userID.(uint)
+
+	id, err := h.parseID(c, "id")
+	if err != nil {
+		h.badRequest(c, err.Error())
+		return
+	}
+
+	var req hotel.UpdateBookingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.badRequest(c, "invalid request body: "+err.Error())
+		return
+	}
+
+	if req.CheckIn == nil && req.CheckOut == nil && req.Guests == nil && req.Notes == nil {
+		h.badRequest(c, "tidak ada data yang akan diupdate")
+		return
+	}
+
+	resp, err := h.service.Update(uid, id, req)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	h.ok(c, resp)
+}
+
+func (h *BookingHandler) UpdateStatus(c *gin.Context) {
+	id, err := h.parseID(c, "id")
+	if err != nil {
+		h.badRequest(c, err.Error())
+		return
+	}
+
+	var req hotel.UpdateBookingStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.badRequest(c, "invalid request: "+err.Error())
+		return
+	}
+
+	if err := h.service.UpdateStatus(id, hotel.BookingStatus(req.Status)); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	h.ok(c, gin.H{
+		"message": "Status booking berhasil diubah menjadi " + req.Status,
+
+	})
+}

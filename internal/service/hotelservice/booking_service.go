@@ -22,6 +22,8 @@ type BookingService interface {
 	List(status string, limit, offset int) ([]hotel.Booking, int64, error)
 	CheckAvailability(checkIn, checkOut time.Time, roomType string) ([]hotel.AvailabilityResponse, error)
 	GuestBook(userID uint, req hotel.GuestBookingRequest) (*hotel.GuestBookingResponse, error)
+	Update(userID, bookingID uint, req hotel.UpdateBookingRequest) (*hotel.BookingResponse, error)
+	UpdateStatus(bookingID uint, newStatus hotel.BookingStatus) error
 }
 
 type bookingService struct {
@@ -362,4 +364,182 @@ func formatRupiah(n int64) string {
 		result.WriteByte(s[i])
 	}
 	return "Rp " + result.String()
+}
+
+// === IMPLEMENTASI METHOD UPDATE (untuk Guest) ===
+func (s *bookingService) Update(userID, bookingID uint, req hotel.UpdateBookingRequest) (*hotel.BookingResponse, error) {
+	tx := s.db.Begin()
+	if tx.Error != nil {
+		return nil, errors.New("gagal memulai transaksi")
+	}
+	defer func() { if r := recover(); r != nil { tx.Rollback() } }()
+
+	booking, err := s.bookingRepo.FindByID(bookingID)
+	if err != nil {
+		tx.Rollback()
+		return nil, errors.New("booking tidak ditemukan")
+	}
+
+	if booking.UserID == nil || *booking.UserID != userID {
+		tx.Rollback()
+		return nil, errors.New("anda tidak memiliki akses untuk mengubah booking ini")
+	}
+
+	if booking.Status != hotel.BookingStatusPending {
+		tx.Rollback()
+		return nil, errors.New("hanya booking dengan status pending yang dapat diubah")
+	}
+
+	// Parse tanggal baru
+	var newCheckIn = booking.CheckIn
+	var newCheckOut = booking.CheckOut
+
+	if req.CheckIn != nil {
+		ci, err := time.Parse("2006-01-02", *req.CheckIn)
+		if err != nil {
+			tx.Rollback()
+			return nil, errors.New("format check_in tidak valid")
+		}
+		newCheckIn = ci
+	}
+	if req.CheckOut != nil {
+		co, err := time.Parse("2006-01-02", *req.CheckOut)
+		if err != nil {
+			tx.Rollback()
+			return nil, errors.New("format check_out tidak valid")
+		}
+		newCheckOut = co
+	}
+
+	if !newCheckOut.After(newCheckIn) {
+		tx.Rollback()
+		return nil, errors.New("check_out harus setelah check_in")
+	}
+
+	// Cek overlapping lagi (kecuali booking ini sendiri)
+	count, err := s.bookingRepo.CountOverlapping(booking.RoomID, newCheckIn, newCheckOut, &bookingID)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	if count > 0 {
+		tx.Rollback()
+		return nil, errors.New("kamar sudah dipesan pada tanggal tersebut")
+	}
+
+	nights := int(newCheckOut.Sub(newCheckIn).Hours() / 24)
+	if nights <= 0 {
+		tx.Rollback()
+		return nil, errors.New("jumlah malam tidak valid")
+	}
+
+	room, err := s.roomRepo.FindByID(booking.RoomID)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	totalPrice := int64(nights) * room.RoomType.Price
+
+	// Update data
+	booking.CheckIn = newCheckIn
+	booking.CheckOut = newCheckOut
+	booking.TotalNights = nights
+	booking.TotalPrice = totalPrice
+	if req.Guests != nil {
+		booking.Guests = *req.Guests
+	}
+	if req.Notes != nil {
+		booking.Notes = *req.Notes
+	}
+
+	if err := tx.Save(booking).Error; err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return nil, err
+	}
+
+	waURL := s.generateWhatsAppURL(booking, room, totalPrice, nights)
+	return &hotel.BookingResponse{
+		ID:          booking.ID,
+		WhatsAppURL: waURL,
+	}, nil
+}
+
+// === IMPLEMENTASI METHOD UPDATE STATUS (untuk Admin) ===
+func (s *bookingService) UpdateStatus(bookingID uint, newStatus hotel.BookingStatus) error {
+	tx := s.db.Begin()
+	if tx.Error != nil {
+		return errors.New("gagal memulai transaksi")
+	}
+	defer func() { if r := recover(); r != nil { tx.Rollback() } }()
+
+	booking, err := s.bookingRepo.FindByID(bookingID)
+	if err != nil {
+		tx.Rollback()
+		return errors.New("booking tidak ditemukan")
+	}
+
+	oldStatus := booking.Status
+
+	if !s.isValidStatusTransition(oldStatus, newStatus) {
+		tx.Rollback()
+		return fmt.Errorf("transisi status dari %s ke %s tidak diperbolehkan", oldStatus, newStatus)
+	}
+
+	booking.Status = newStatus
+	if err := tx.Save(booking).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	// Update status kamar
+	room, _ := s.roomRepo.FindByID(booking.RoomID)
+	if room != nil {
+		switch newStatus {
+		case hotel.BookingStatusConfirmed, hotel.BookingStatusCheckedIn:
+			room.Status = hotel.RoomStatusBooked
+		case hotel.BookingStatusPending, hotel.BookingStatusCancelled, hotel.BookingStatusCheckedOut:
+			count, _ := s.bookingRepo.CountOverlapping(booking.RoomID, booking.CheckIn, booking.CheckOut, nil)
+			if count == 0 {
+				room.Status = hotel.RoomStatusAvailable
+			}
+		}
+		if room != nil {
+			tx.Save(room)
+		}
+	}
+
+	return tx.Commit().Error
+}
+
+func (s *bookingService) isValidStatusTransition(from, to hotel.BookingStatus) bool {
+	allowed := map[hotel.BookingStatus][]hotel.BookingStatus{
+		hotel.BookingStatusPending: {
+			hotel.BookingStatusConfirmed,
+			hotel.BookingStatusCancelled,
+		},
+		hotel.BookingStatusConfirmed: {
+			hotel.BookingStatusCheckedIn,
+			hotel.BookingStatusCancelled,
+			hotel.BookingStatusPending, // Admin boleh balikin ke pending
+		},
+		hotel.BookingStatusCheckedIn: {
+			hotel.BookingStatusCheckedOut,
+			hotel.BookingStatusCancelled,
+		},
+		hotel.BookingStatusCancelled: {
+			hotel.BookingStatusPending, // Boleh dibatalin cancel
+		},
+		hotel.BookingStatusCheckedOut: {},
+	}
+
+	for _, allowedStatus := range allowed[from] {
+		if to == allowedStatus {
+			return true
+		}
+	}
+	return false
 }

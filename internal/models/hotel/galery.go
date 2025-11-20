@@ -10,7 +10,7 @@ type Gallery struct {
 	ID       uint   `gorm:"primaryKey" json:"id"`
 	RoomID   *uint  `gorm:"index;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"room_id,omitempty"` 
 	Room     *Room  `json:"room,omitempty"`
-
+	
 	Title    string `gorm:"size:150" json:"title"`
 	Caption  string `gorm:"type:text" json:"caption"`
 	URL      string `gorm:"size:255;not null" json:"url"`     

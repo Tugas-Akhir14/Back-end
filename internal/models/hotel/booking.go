@@ -97,13 +97,24 @@ type AvailabilityRequest struct {
 	CheckIn string `form:"check_in" binding:"required"`
 	CheckOut string `form:"check_out" binding:"required"`
 	Type     string `form:"type,omitempty"`
-}
+}   
 
 type AvailabilityResponse struct {
 	Type           string `json:"type"`
 	PricePerNight  int64  `json:"price_per_night"`
 	AvailableRooms int    `json:"available_rooms"`
 	TotalRooms     int    `json:"total_rooms"`
+}
+
+type UpdateBookingRequest struct {
+	CheckIn  *string `json:"check_in,omitempty"`
+	CheckOut *string `json:"check_out,omitempty"`
+	Guests   *int    `json:"guests,omitempty" binding:"omitempty,gte=1"`
+	Notes    *string `json:"notes,omitempty"`
+}
+
+type UpdateBookingStatusRequest struct {
+	Status string `json:"status" binding:"required,oneof=pending confirmed cancelled checked_in checked_out"`
 }
 
 
