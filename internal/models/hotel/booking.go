@@ -11,11 +11,11 @@ import (
 type BookingStatus string
 
 const (
-	BookingStatusPending     BookingStatus = "pending"
-	BookingStatusConfirmed   BookingStatus = "confirmed"
-	BookingStatusCancelled   BookingStatus = "cancelled"
-	BookingStatusCheckedIn   BookingStatus = "checked_in"
-	BookingStatusCheckedOut  BookingStatus = "checked_out"
+	BookingStatusPending    BookingStatus = "pending"
+	BookingStatusConfirmed  BookingStatus = "confirmed"
+	BookingStatusCancelled  BookingStatus = "cancelled"
+	BookingStatusCheckedIn  BookingStatus = "checked_in"
+	BookingStatusCheckedOut BookingStatus = "checked_out"
 )
 
 func (s BookingStatus) String() string {
@@ -23,23 +23,25 @@ func (s BookingStatus) String() string {
 }
 
 type Booking struct {
-	ID          uint            `gorm:"primaryKey" json:"id"`
-	RoomID      uint            `gorm:"not null" json:"room_id"`
-	UserID      *uint           `json:"user_id,omitempty"`
-	Room        Room            `gorm:"foreignKey:RoomID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT" json:"room,omitempty"`
-	Name        string          `gorm:"size:100;not null" json:"name"`
-	Phone       string          `gorm:"size:20;not null" json:"phone"`
-	Email       string          `gorm:"size:100" json:"email"`
-	CheckIn     time.Time       `gorm:"not null" json:"check_in"`
-	CheckOut    time.Time       `gorm:"not null" json:"check_out"`
-	Guests      int             `gorm:"not null" json:"guests"`
-	TotalNights int             `gorm:"not null" json:"total_nights"`
-	TotalPrice  int64           `gorm:"not null" json:"total_price"`
-	Status      BookingStatus   `gorm:"type:varchar(20);default:'pending'" json:"status"`
-	Notes       string          `gorm:"type:text" json:"notes,omitempty"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt  `gorm:"index" json:"-"`
+	ID          uint           `gorm:"primaryKey" json:"id"`
+	RoomID      uint           `gorm:"not null" json:"room_id"`
+	UserID      *uint          `json:"user_id,omitempty"`
+	Room        Room           `gorm:"foreignKey:RoomID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT" json:"room,omitempty"`
+	Name        string         `gorm:"size:100;not null" json:"name"`
+	Phone       string         `gorm:"size:20;not null" json:"phone"`
+	Email       string         `gorm:"size:100" json:"email"`
+	CheckIn     time.Time      `gorm:"not null" json:"check_in"`
+	CheckOut    time.Time      `gorm:"not null" json:"check_out"`
+	Guests      int            `gorm:"not null" json:"guests"`
+	TotalNights int            `gorm:"not null" json:"total_nights"`
+	TotalPrice  int64          `gorm:"not null" json:"total_price"`
+	ExtraGuests int            `gorm:"default:0" json:"extra_guests"` // TAMBAHAN
+	ExtraCharge int64          `gorm:"default:0" json:"extra_charge"`
+	Status      BookingStatus  `gorm:"type:varchar(20);default:'pending'" json:"status"`
+	Notes       string         `gorm:"type:text" json:"notes,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // Hook: Validasi sebelum create
@@ -67,7 +69,7 @@ type CreateBookingRequest struct {
 	Email    string `json:"email" binding:"required,email"`
 	CheckIn  string `json:"check_in" binding:"required"`
 	CheckOut string `json:"check_out" binding:"required"`
-	Guests   int    `json:"guests" binding:"required,gt=0"`
+	Guests   int    `json:"guests" binding:"required,min=1,max=4"`
 	Notes    string `json:"notes,omitempty"`
 }
 
@@ -94,10 +96,10 @@ type GuestBookingResponse struct {
 }
 
 type AvailabilityRequest struct {
-	CheckIn string `form:"check_in" binding:"required"`
+	CheckIn  string `form:"check_in" binding:"required"`
 	CheckOut string `form:"check_out" binding:"required"`
 	Type     string `form:"type,omitempty"`
-}   
+}
 
 type AvailabilityResponse struct {
 	Type           string `json:"type"`
@@ -116,7 +118,3 @@ type UpdateBookingRequest struct {
 type UpdateBookingStatusRequest struct {
 	Status string `json:"status" binding:"required,oneof=pending confirmed cancelled checked_in checked_out"`
 }
-
-
-
-

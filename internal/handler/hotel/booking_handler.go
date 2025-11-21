@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"backend/internal/models/hotel"
@@ -29,19 +30,38 @@ func NewBookingHandler(service hotelservice.BookingService) *BookingHandler {
 }
 
 func (h *BookingHandler) Create(c *gin.Context) {
-	var req hotel.CreateBookingRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		h.badRequest(c, "invalid request body: "+err.Error())
-		return
-	}
+    // === AMBIL USER ID DARI JWT ===
+    userID, exists := c.Get("user_id")
+    if !exists {
+        h.unauthorized(c, "token tidak valid")
+        return
+    }
+    uid, ok := userID.(uint)
+    if !ok {
+        h.unauthorized(c, "user id tidak valid")
+        return
+    }
 
-	resp, err := h.service.Create(req)
-	if err != nil {
-		h.handleError(c, err)
-		return
-	}
+    var req hotel.CreateBookingRequest
+    if err := c.ShouldBindJSON(&req); err != nil {
+        h.badRequest(c, "data tidak valid: "+err.Error())
+        return
+    }
 
-	h.created(c, resp)
+    // Validasi nomor HP harus 62...
+    if !strings.HasPrefix(strings.ReplaceAll(req.Phone, " ", ""), "62") {
+        h.badRequest(c, "nomor WhatsApp harus diawali 62 (contoh: 6281234567890)")
+        return
+    }
+
+    // Kirim userID ke service
+    resp, err := h.service.CreateWithUser(uid, req)
+    if err != nil {
+        h.handleError(c, err)
+        return
+    }
+
+    h.created(c, resp)
 }
 
 func (h *BookingHandler) GuestBook(c *gin.Context) {
