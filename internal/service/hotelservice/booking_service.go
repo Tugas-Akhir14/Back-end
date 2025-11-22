@@ -294,53 +294,86 @@ Terima kasih`,
 
 	return "https://wa.me/" + s.waNumber + "?text=" + url.QueryEscape(msg)
 }
-// ==================================================================
-// GUEST BOOK (Multiple Rooms) – Belum ada extra guest (opsional nanti)
-// ==================================================================
 func (s *bookingService) GuestBook(userID uint, req hotel.GuestBookingRequest) (*hotel.GuestBookingResponse, error) {
-
-	// VALIDASI MAKSIMAL 4 TAMU PER KAMAR
-	if req.Guests > MAX_GUESTS {
-		return nil, errors.New("maksimal 4 tamu per kamar")
+	// Validasi tamu: maks 4 per kamar
+	maxAllowedGuests := req.TotalRooms * MAX_GUESTS
+	if req.Guests > maxAllowedGuests {
+		return nil, fmt.Errorf("maksimal %d tamu untuk %d kamar (4 orang per kamar)", maxAllowedGuests, req.TotalRooms)
 	}
 	if req.Guests < 1 {
 		return nil, errors.New("minimal 1 tamu")
 	}
 
+	// Parse tanggal
 	checkIn, err := time.Parse("2006-01-02", req.CheckIn)
 	if err != nil {
-		return nil, errors.New("format check_in tidak valid")
+		return nil, errors.New("format check_in tidak valid (YYYY-MM-DD)")
 	}
 	checkOut, err := time.Parse("2006-01-02", req.CheckOut)
 	if err != nil {
-		return nil, errors.New("format check_out tidak valid")
+		return nil, errors.New("format check_out tidak valid (YYYY-MM-DD)")
 	}
 	if !checkOut.After(checkIn) {
 		return nil, errors.New("check_out harus setelah check_in")
 	}
 
+	nights := int(checkOut.Sub(checkIn).Hours() / 24)
+	if nights <= 0 {
+		return nil, errors.New("minimal menginap 1 malam")
+	}
+
+	// Cek availability dulu
 	avail, err := s.CheckAvailability(checkIn, checkOut, req.RoomType)
 	if err != nil || len(avail) == 0 {
 		return nil, errors.New("tipe kamar tidak tersedia")
 	}
 	if avail[0].AvailableRooms < req.TotalRooms {
-		return nil, fmt.Errorf("hanya %d kamar tersedia", avail[0].AvailableRooms)
+		return nil, fmt.Errorf("hanya tersedia %d kamar %s pada tanggal tersebut", avail[0].AvailableRooms, strings.Title(req.RoomType))
 	}
 
-	nights := int(checkOut.Sub(checkIn).Hours() / 24)
-	pricePerRoom := int64(nights) * avail[0].PricePerNight
-	totalPrice := pricePerRoom * int64(req.TotalRooms)
+	// Hitung harga
+	extraGuestsPerRoom := max(0, (req.Guests+req.TotalRooms-1)/req.TotalRooms-BASE_GUESTS_INCLUDED) // pembulatan ke atas
+	totalExtraGuests := max(0, req.Guests-BASE_GUESTS_INCLUDED*req.TotalRooms)
+	extraCharge := int64(totalExtraGuests) * EXTRA_GUEST_PRICE * int64(nights)
+	basePrice := int64(nights) * avail[0].PricePerNight * int64(req.TotalRooms)
+	totalPrice := basePrice + extraCharge
 
 	tx := s.db.Begin()
+	if tx.Error != nil {
+		return nil, errors.New("gagal memulai transaksi")
+	}
 	defer func() { if r := recover(); r != nil { tx.Rollback() } }()
 
+	// INI FIX UTAMANYA: AMBIL KAMAR YANG TIDAK SEDANG DIPESAN PADA TANGGAL TERSEBUT
 	var rooms []hotel.Room
-	if err := tx.Preload("RoomType").
-		Where("room_type_id IN (SELECT id FROM room_types WHERE type = ?) AND status = ? AND deleted_at IS NULL", req.RoomType, string(hotel.RoomStatusAvailable)).
-		Limit(req.TotalRooms).
-		Find(&rooms).Error; err != nil {
+	err = tx.Raw(`
+		SELECT DISTINCT r.*
+		FROM rooms r
+		JOIN room_types rt ON r.room_type_id = rt.id
+		WHERE rt.type = ?
+		  AND r.deleted_at IS NULL
+		  AND r.id NOT IN (
+		    SELECT b.room_id 
+		    FROM bookings b 
+		    WHERE b.status IN ('pending', 'confirmed', 'checked_in')
+		      AND (
+		        (b.check_in < ? AND b.check_out > ?) OR
+		        (b.check_in < ? AND b.check_out > ?) OR  
+		        (b.check_in >= ? AND b.check_out <= ?) OR
+		        (b.check_in <= ? AND b.check_out >= ?)
+		      )
+		  )
+		LIMIT ?
+	`, req.RoomType, checkOut, checkIn, checkIn, checkOut, checkIn, checkOut, checkIn, checkOut, req.TotalRooms).
+		Scan(&rooms).Error
+
+	if err != nil {
 		tx.Rollback()
-		return nil, err
+		return nil, fmt.Errorf("gagal mengambil kamar: %v", err)
+	}
+	if len(rooms) < req.TotalRooms {
+		tx.Rollback()
+		return nil, fmt.Errorf("hanya tersedia %d kamar pada tanggal tersebut", len(rooms))
 	}
 
 	var bookingIDs []uint
@@ -354,8 +387,10 @@ func (s *bookingService) GuestBook(userID uint, req hotel.GuestBookingRequest) (
 			CheckIn:     checkIn,
 			CheckOut:    checkOut,
 			Guests:      req.Guests,
+			ExtraGuests: extraGuestsPerRoom,
+			ExtraCharge: int64(extraGuestsPerRoom) * EXTRA_GUEST_PRICE * int64(nights),
 			TotalNights: nights,
-			TotalPrice:  pricePerRoom,
+			TotalPrice:  int64(nights)*room.RoomType.Price + int64(extraGuestsPerRoom)*EXTRA_GUEST_PRICE*int64(nights),
 			Status:      hotel.BookingStatusPending,
 			Notes:       req.Notes,
 		}
@@ -370,7 +405,7 @@ func (s *bookingService) GuestBook(userID uint, req hotel.GuestBookingRequest) (
 		return nil, err
 	}
 
-	waURL := s.generateWhatsAppURLGuest(req, avail[0], nights, totalPrice, len(bookingIDs), checkIn, checkOut)
+	waURL := s.generateWhatsAppURLGuest(req, avail[0], nights, totalPrice, req.TotalRooms, checkIn, checkOut)
 	return &hotel.GuestBookingResponse{
 		BookingIDs:  bookingIDs,
 		WhatsAppURL: waURL,
@@ -378,16 +413,14 @@ func (s *bookingService) GuestBook(userID uint, req hotel.GuestBookingRequest) (
 }
 
 func (s *bookingService) generateWhatsAppURLGuest(req hotel.GuestBookingRequest, avail hotel.AvailabilityResponse, nights int, totalPrice int64, totalRooms int, checkIn, checkOut time.Time) string {
-	// Hitung extra guest (sama seperti booking biasa)
-	extraGuests := max(0, req.Guests-BASE_GUESTS_INCLUDED)
-	extraCharge := int64(extraGuests) * EXTRA_GUEST_PRICE * int64(nights) * int64(totalRooms) // per kamar!
+	totalExtraGuests := max(0, req.Guests-BASE_GUESTS_INCLUDED*totalRooms)
+	extraCharge := int64(totalExtraGuests) * EXTRA_GUEST_PRICE * int64(nights)
 	basePrice := int64(nights) * avail.PricePerNight * int64(totalRooms)
-	totalWithExtra := basePrice + extraCharge
 
 	extraText := ""
-	if extraGuests > 0 {
-		extraText = fmt.Sprintf("\nTamu Ekstra    : %d orang × Rp150.000 × %d malam × %d kamar = *Rp%s*\n(Sudah termasuk breakfast & amenities)",
-			extraGuests, nights, totalRooms, formatRupiah(extraCharge))
+	if totalExtraGuests > 0 {
+		extraText = fmt.Sprintf("\nTamu Ekstra    : %d orang × Rp150.000 × %d malam × %d kamar = *Rp%s*",
+			totalExtraGuests/ totalRooms, nights, totalRooms, formatRupiah(extraCharge))
 	}
 
 	msg := fmt.Sprintf(`*PESANAN KAMAR – MUTIARA HOTEL*
@@ -403,18 +436,16 @@ Check-out      : %s
 Lama Menginap  : %d malam
 Jumlah Tamu    : %d orang%s
 
-Harga Kamar    : %s%s
+Harga Kamar    : Rp%s × %d kamar × %d malam = *Rp%s*%s
 ──────────────────────────
 *TOTAL BAYAR   : %s*
 
 Catatan:
 %s
 
-Mohon segera konfirmasi ke tamu.
+Mohon segera konfirmasi pembayaran.
 Terima kasih`,
-		req.Name,
-		req.Phone,
-		req.Email,
+		req.Name, req.Phone, req.Email,
 		strings.Title(req.RoomType),
 		totalRooms,
 		checkIn.Format("02 Jan 2006"),
@@ -422,9 +453,10 @@ Terima kasih`,
 		nights,
 		req.Guests,
 		extraText,
+		formatRupiah(int64(avail.PricePerNight)), totalRooms, nights,
 		formatRupiah(basePrice),
 		extraText,
-		formatRupiah(totalWithExtra),
+		formatRupiah(totalPrice),
 		req.Notes,
 	)
 

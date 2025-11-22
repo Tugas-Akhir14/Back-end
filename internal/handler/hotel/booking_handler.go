@@ -82,6 +82,13 @@ func (h *BookingHandler) GuestBook(c *gin.Context) {
 		return
 	}
 
+	// TAMBAH VALIDASI NOMOR HP DI GUEST BOOK!
+	phone := strings.ReplaceAll(req.Phone, " ", "")
+	if !strings.HasPrefix(phone, "62") {
+		h.badRequest(c, "nomor WhatsApp harus diawali 62 (contoh: 6281234567890)")
+		return
+	}
+
 	resp, err := h.service.GuestBook(uid, req)
 	if err != nil {
 		h.handleError(c, err)

@@ -21,6 +21,7 @@ type ProductCafe struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+
 type ProductCafeCreate struct {
 	Nama       string  `json:"nama" binding:"required"`
 	Deskripsi  string  `json:"deskripsi"`
