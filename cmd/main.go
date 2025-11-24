@@ -109,63 +109,62 @@ func main() {
 	}
 }
 
-// === BACKGROUND JOB: Auto Checkout & Check-in ===
+// GANTI SELURUH FUNGSI startAutoCheckout JADI INI:
 func startAutoCheckout(db *gorm.DB) {
-	ticker := time.NewTicker(1 * time.Hour)
-	defer ticker.Stop()
+    ticker := time.NewTicker(1 * time.Hour)
+    defer ticker.Stop()
 
-	log.Println("Background job: Auto Checkout dimulai")
+    log.Println("Background job: Auto Checkout & Check-in dimulai")
 
-// cmd/main.go → di dalam startAutoCheckout
-for {
-	select {
-	case <-ticker.C:
-		now := time.Now()
-		today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+    for {
+        select {
+        case <-ticker.C:
+            now := time.Now()
+            today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
-		tx := db.Begin()
-		if tx.Error != nil {
-			log.Printf("AutoCheckout: gagal mulai transaksi: %v", tx.Error)
-			continue
-		}
+            tx := db.Begin()
+            if tx.Error != nil {
+                log.Printf("AutoCheckout: gagal mulai transaksi: %v", tx.Error)
+                continue
+            }
 
-		// CHECKOUT
-		var expired []hotel.Booking
-		if err := tx.Where("DATE(check_out) < ? AND status IN ?", today, []string{
-			hotel.BookingStatusConfirmed.String(),
-			hotel.BookingStatusCheckedIn.String(),
-		}).Find(&expired).Error; err != nil {
-			tx.Rollback()
-			log.Printf("AutoCheckout: error query expired: %v", err)
-			continue
-		}
+            // CHECKOUT otomatis
+            var expired []hotel.Booking
+            if err := tx.Where("DATE(check_out) < ? AND status IN ?", today, []string{"confirmed", "checked_in"}).
+                Find(&expired).Error; err != nil {
+                tx.Rollback()
+                log.Printf("AutoCheckout: error query expired: %v", err)
+                continue
+            }
 
-		for _, b := range expired {
-			tx.Model(&b).Update("status", hotel.BookingStatusCheckedOut.String())
-			var room hotel.Room
-			if err := tx.First(&room, b.RoomID).Error; err == nil {
-				tx.Model(&room).Update("status", hotel.RoomStatusAvailable.String())
-			}
-		}
+            for _, b := range expired {
+                tx.Model(&b).Update("status", "checked_out")
+                var room hotel.Room
+                if err := tx.First(&room, b.RoomID).Error; err == nil {
+                    tx.Model(&room).Update("status", "available")
+                }
+            }
 
-		// CHECKIN
-		var todayCheckins []hotel.Booking
-		if err := tx.Where("DATE(check_in) = ? AND status = ?", today, hotel.BookingStatusConfirmed.String()).
-			Find(&todayCheckins).Error; err != nil {
-			tx.Rollback()
-			log.Printf("AutoCheckin: error query today: %v", err)
-			continue
-		}
+            // CHECKIN otomatis
+            var todayCheckins []hotel.Booking
+            if err := tx.Where("DATE(check_in) = ? AND status = ?", today, "confirmed").
+                Find(&todayCheckins).Error; err != nil {
+                tx.Rollback()
+                log.Printf("AutoCheckin: error query today: %v", err)
+                continue
+            }
 
-		for _, b := range todayCheckins {
-			tx.Model(&b).Update("status", hotel.BookingStatusCheckedIn.String())
-		}
+            for _, b := range todayCheckins {
+                tx.Model(&b).Update("status", "checked_in")
+            }
 
-		if err := tx.Commit().Error; err != nil {
-			log.Printf("AutoCheckout: commit error: %v", err)
-		}
-	}
-}
+            if err := tx.Commit().Error; err != nil {
+                log.Printf("AutoCheckout: commit error: %v", err)
+            } else {
+                log.Printf("Auto job selesai: %d checkout, %d checkin", len(expired), len(todayCheckins))
+            }
+        }
+    }
 }
 
 func seedSuperAdmin(db *gorm.DB) {

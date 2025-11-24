@@ -26,12 +26,26 @@ type LoginResponse struct {
 	User  *auth.AdminResponse `json:"user"`
 }
 
+type UpdateProfileRequest struct {
+	FullName    string `json:"full_name" binding:"omitempty,min=2"`
+	Email       string `json:"email" binding:"omitempty,email"`
+	PhoneNumber string `json:"phone_number" binding:"omitempty,min=10"`
+}
+
+type ChangePasswordRequest struct {
+	OldPassword     string `json:"old_password" binding:"required,min=8"`
+	NewPassword     string `json:"new_password" binding:"required,min=8"`
+	ConfirmPassword string `json:"confirm_password" binding:"required,eqfield=NewPassword"`
+}
+
 type AdminService interface {
 	Register(req *RegisterRequest) (*auth.AdminResponse, error)
 	Login(email, password string) (*LoginResponse, error)
 	GetProfile(id uint) (*auth.AdminResponse, error)
 	ApproveUser(id uint, requesterRole auth.Role) error
 	GetPendingAdmins(requesterRole auth.Role) ([]auth.AdminResponse, error)
+	UpdateProfile(id uint, req *UpdateProfileRequest) (*auth.AdminResponse, error)
+	ChangePassword(id uint, req *ChangePasswordRequest) error
 }
 
 type adminService struct {
@@ -149,4 +163,53 @@ func toResponse(a *auth.Admin) *auth.AdminResponse {
 		Role:        a.Role,
 		IsApproved:  a.IsApproved,
 	}
+}
+
+func (s *adminService) UpdateProfile(id uint, req *UpdateProfileRequest) (*auth.AdminResponse, error) {
+	admin, err := s.repo.FindByID(id)
+	if err != nil || admin == nil {
+		return nil, errors.New("admin tidak ditemukan")
+	}
+
+	// Cek email unik kalau diubah
+	if req.Email != "" && req.Email != admin.Email {
+		if existing, _ := s.repo.FindByEmail(req.Email); existing != nil {
+			return nil, errors.New("email sudah digunakan oleh akun lain")
+		}
+		admin.Email = req.Email
+	}
+
+	if req.FullName != "" {
+		admin.FullName = req.FullName
+	}
+	if req.PhoneNumber != "" {
+		admin.PhoneNumber = req.PhoneNumber
+	}
+
+	if err := s.repo.Update(admin); err != nil {
+		return nil, err
+	}
+
+	return toResponse(admin), nil
+}
+
+func (s *adminService) ChangePassword(id uint, req *ChangePasswordRequest) error {
+	admin, err := s.repo.FindByID(id)
+	if err != nil || admin == nil {
+		return errors.New("admin tidak ditemukan")
+	}
+
+	// Verifikasi password lama
+	if err := bcrypt.CompareHashAndPassword([]byte(admin.Password), []byte(req.OldPassword)); err != nil {
+		return errors.New("password lama salah")
+	}
+
+	// Hash password baru
+	hashed, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	admin.Password = string(hashed)
+	return s.repo.Update(admin)
 }

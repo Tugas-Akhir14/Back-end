@@ -13,6 +13,7 @@ type AdminRepository interface {
 	FindByID(id uint) (*auth.Admin, error)
 	Approve(id uint) error
 	GetPending() ([]auth.Admin, error)
+	Update(admin *auth.Admin) error
 }
 
 type adminRepository struct {
@@ -59,4 +60,8 @@ func (r *adminRepository) GetPending() ([]auth.Admin, error) {
 	var admins []auth.Admin
 	err := r.db.Where("role LIKE 'admin_%' AND is_approved = ?", false).Find(&admins).Error
 	return admins, err
+}
+
+func (r *adminRepository) Update(admin *auth.Admin) error {
+	return r.db.Save(admin).Error
 }

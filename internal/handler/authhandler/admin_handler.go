@@ -106,3 +106,41 @@ func (h *AdminHandler) GetPending(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"data": admins})
 }
+
+func (h *AdminHandler) UpdateProfile(c *gin.Context) {
+	userID := c.GetUint("user_id")
+
+	var req serviceauth.UpdateProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	admin, err := h.service.UpdateProfile(userID, &req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Profil berhasil diperbarui",
+		"data":    admin,
+	})
+}
+
+func (h *AdminHandler) ChangePassword(c *gin.Context) {
+	userID := c.GetUint("user_id")
+
+	var req serviceauth.ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.service.ChangePassword(userID, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Password berhasil diubah"})
+}

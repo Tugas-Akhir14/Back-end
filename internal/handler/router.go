@@ -39,6 +39,8 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 	r.POST("/admins/register", adm.Register)
 	r.POST("/admins/login", adm.Login)
 	r.GET("/admins/profile", middleware.AuthMiddleware(), adm.GetProfile)
+	r.PATCH("/admins/profile", middleware.AuthMiddleware(), adm.UpdateProfile)
+	r.PATCH("/admins/profile/password", middleware.AuthMiddleware(), adm.ChangePassword)
 
 	
 
@@ -103,8 +105,6 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
         public.GET("/reviews/me", middleware.AuthMiddleware(), middleware.RoleMiddleware(auth.RoleGuest), reviewH.GetMyReviews)
         public.PUT("/reviews/:id", middleware.AuthMiddleware(), middleware.RoleMiddleware(auth.RoleGuest), reviewH.Update)
         public.DELETE("/reviews/:id", middleware.AuthMiddleware(), reviewH.Delete)
-		// FITUR BARU
-	
 
 		public.GET("/souvenirs", souvenirProductH.ListPublic)
 		public.GET("/souvenirs/:id", souvenirProductH.GetPublicByID)
@@ -118,9 +118,23 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 		public.GET("/cafe/:id", cafeProductH.GetPublicByID)
 		public.GET("/cafe/category/:category_id", cafeProductH.GetPublicByCategory)
 
-		public.POST("/bookings", middleware.AuthMiddleware(), middleware.RoleMiddleware(auth.RoleGuest), bookingH.Create)
-		public.POST("/guest-bookings", middleware.AuthMiddleware(), middleware.RoleMiddleware(auth.RoleGuest), bookingH.GuestBook)
+	// Booking sebagai tamu (harus login)
+		public.POST("/bookings",
+			middleware.AuthMiddleware(),
+			middleware.RoleMiddleware("guest"),
+			bookingH.Create) // SATU-SATUNYA ENDPOINT UNTUK BOOKING (1 sampai n kamar)
+
 		public.GET("/availability", bookingH.CheckAvailability)
+
+		public.GET("/bookings/me",
+			middleware.AuthMiddleware(),
+			middleware.RoleMiddleware("guest"),
+			bookingH.GetMyBookings)
+
+		public.PATCH("/bookings/:id",
+			middleware.AuthMiddleware(),
+			middleware.RoleMiddleware("guest"),
+			bookingH.Update)
 	}
 
 	// === ADMIN API ===
