@@ -171,7 +171,7 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 		hotelGroup.PUT("/galleries/:id/image", galleryH.UpdateImage)
 		hotelGroup.DELETE("/galleries/:id", galleryH.Delete)
 
-		hotelGroup.GET("/news", newsH.List)
+		hotelGroup.GET("/news", newsH.List)	
 		hotelGroup.GET("/news/:id", newsH.GetByID)
 		hotelGroup.GET("/news/slug/:slug", newsH.GetBySlug)
 		hotelGroup.POST("/news", newsH.Create)
