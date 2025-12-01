@@ -5,45 +5,93 @@ import (
 	"fmt"
 	"log"
 	"net/smtp"
+
+	"backend/internal/config"
 )
 
+var (
+	smtpHost string
+	smtpPort string
+	smtpUser string
+	smtpPass string
+	from     = "Hotel Mutiara <no-reply@hotelmutiara.com>"
+	loaded   bool
+)
+
+// Load config sekali saja, saat pertama kali dipakai
+func loadSMTPConfig() {
+	if loaded {
+		return
+	}
+	cfg := config.GetConfig()
+	smtpHost = cfg.SMTPHost
+	smtpPort = cfg.SMTPPort
+	smtpUser = cfg.SMTPUser
+	smtpPass = cfg.SMTPPass
+	loaded = true
+}
+
 func SendApprovalPendingEmail(to, name string) {
-	from := "no-reply@hotelmutiara.com"
+	loadSMTPConfig() // baru load saat benar-benar kirim email
+
+	auth := smtp.PlainAuth("", smtpUser, smtpPass, smtpHost)
+
 	subject := "Menunggu Persetujuan Akun Admin"
 	body := fmt.Sprintf(`
 		<h2>Halo %s,</h2>
 		<p>Akun admin Anda telah berhasil dibuat!</p>
-		<p>Silakan tunggu persetujuan dari <strong>Superadmin</strong>.</p>
+		<p>Sedang <strong>menunggu persetujuan Superadmin</strong>.</p>
 		<br>
 		<p>Terima kasih,<br>Tim Hotel Mutiara</p>
 	`, name)
-	sendEmail(from, to, subject, body)
-}
 
-func SendApprovalSuccessEmail(to, name string) {
-	from := "no-reply@hotelmutiara.com"
-	subject := "Akun Anda Telah Disetujui!"
-	body := fmt.Sprintf(`
-		<h2>Selamat %s!</h2>
-		<p>Akun admin Anda telah <strong>disetujui</strong> oleh Superadmin.</p>
-		<p><a href="http://localhost:3000/auth/signin" style="background:#000;color:#fff;padding:10px 20px;text-decoration:none;border-radius:8px;">Login Sekarang</a></p>
-		<br>
-		<p>Terima kasih,<br>Tim Hotel Mutiara</p>
-	`, name)
-	sendEmail(from, to, subject, body)
-}
-
-func sendEmail(from, to, subject, body string) {
-	auth := smtp.PlainAuth("", "YOUR_GMAIL@gmail.com", "YOUR_APP_PASSWORD", "smtp.gmail.com")
 	msg := []byte("To: " + to + "\r\n" +
 		"From: " + from + "\r\n" +
 		"Subject: " + subject + "\r\n" +
 		"MIME-version: 1.0;\r\n" +
-		"Content-Type: text/html; charset=\"UTF-8\";\r\n\r\n" +
-		body)
+		"Content-Type: text/html; charset=\"UTF-8\";\r\n\r\n" + body)
 
-	err := smtp.SendMail("smtp.gmail.com:587", auth, from, []string{to}, msg)
-	if err != nil {
-		log.Println("Email gagal:", err)
-	}
+	go func() {
+		addr := smtpHost + ":" + smtpPort
+		if err := smtp.SendMail(addr, auth, smtpUser, []string{to}, msg); err != nil {
+			log.Printf("[EMAIL GAGAL] %s → %v", to, err)
+		} else {
+			log.Printf("[EMAIL BERHASIL] → %s (Pending Approval)", to)
+		}
+	}()
+}
+
+func SendApprovalSuccessEmail(to, name string) {
+	loadSMTPConfig()
+
+	auth := smtp.PlainAuth("", smtpUser, smtpPass, smtpHost)
+
+	subject := "Akun Anda Telah Disetujui!"
+	body := fmt.Sprintf(`
+		<h2>Selamat %s!</h2>
+		<p>Akun admin Anda telah <strong>disetujui</strong> oleh Superadmin.</p>
+		<p style="margin:30px 0;">
+			<a href="https://hotelmutiara.vercel.app/auth/signin"
+			   style="background:#f59e0b;color:white;padding:14px 32px;text-decoration:none;border-radius:10px;font-weight:bold;">
+			   Login Sekarang
+			</a>
+		</p>
+		<br>
+		<p>Terima kasih,<br>Tim Hotel Mutiara</p>
+	`, name)
+
+	msg := []byte("To: " + to + "\r\n" +
+		"From: " + from + "\r\n" +
+		"Subject: " + subject + "\r\n" +
+		"MIME-version: 1.0;\r\n" +
+		"Content-Type: text/html; charset=\"UTF-8\";\r\n\r\n" + body)
+
+	go func() {
+		addr := smtpHost + ":" + smtpPort
+		if err := smtp.SendMail(addr, auth, smtpUser, []string{to}, msg); err != nil {
+			log.Printf("[EMAIL GAGAL] %s → %v", to, err)
+		} else {
+			log.Printf("[EMAIL BERHASIL] → %s (Approved)", to)
+		}
+	}()
 }

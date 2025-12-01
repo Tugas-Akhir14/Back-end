@@ -103,5 +103,12 @@ func (r *roomRepository) Update(room *hotel.Room) error {
 }
 
 func (r *roomRepository) Delete(id uint) error {
-	return r.db.Delete(&hotel.Room{}, id).Error
+    result := r.db.Unscoped().Delete(&hotel.Room{}, id)
+    if result.Error != nil {
+        return result.Error
+    }
+    if result.RowsAffected == 0 {
+        return gorm.ErrRecordNotFound
+    }
+    return nil
 }

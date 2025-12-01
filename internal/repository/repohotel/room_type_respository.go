@@ -57,5 +57,5 @@ func (r *RoomTypeRepositoryImpl) Update(rt *hotel.RoomType) error {
 }
 
 func (r *RoomTypeRepositoryImpl) Delete(id uint) error {
-	return r.DB.Delete(&hotel.RoomType{}, id).Error
+    return r.DB.Unscoped().Delete(&hotel.RoomType{}, id).Error
 }

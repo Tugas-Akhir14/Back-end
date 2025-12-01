@@ -2,7 +2,6 @@
 package main
 
 import (
-	_ "backend/utils"
 	"backend/internal/config"
 	"backend/internal/handler"
 	"backend/internal/models/auth"
@@ -22,12 +21,22 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
 func main() {
+	
+	if err := godotenv.Load(); err != nil {
+		log.Println("⚠️  .env tidak ditemukan, pakai system environment")
+	} else {
+		log.Println("✅ .env berhasil dimuat")
+	}
+
 	config.LoadConfig()
+
+
 	db := config.InitDB()
 
 	// === MIGRASI & SEED ===

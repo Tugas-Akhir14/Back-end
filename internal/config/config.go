@@ -3,7 +3,6 @@ package config
 
 import (
 	"log"
-	"strings"
 	"sync"
 
 	"github.com/spf13/viper"
@@ -14,59 +13,64 @@ import (
 type Config struct {
 	DatabaseURL string
 	JWTSecret   string
+	SMTPHost    string
+	SMTPPort    string
+	SMTPUser    string
+	SMTPPass    string
 }
 
 var (
-	cfg  Config
-	db   *gorm.DB
-	once sync.Once
+	instance *Config
+	db       *gorm.DB
+	once     sync.Once
+	dbOnce   sync.Once
 )
 
-// LoadConfig membaca .env
-func LoadConfig() Config {
-	viper.SetConfigFile(".env")
-	if err := viper.ReadInConfig(); err != nil {
-		panic("Error reading config file: " + err.Error())
-	}
-
-	cfg = Config{
-		DatabaseURL: viper.GetString("DATABASE_URL"),
-		JWTSecret:   viper.GetString("JWT_SECRET"),
-	}
-	return cfg
-}
-
-// GetConfig mengembalikan config yang sudah di-load
-func GetConfig() Config {
-	return cfg
-}
-
-// InitDB inisialisasi DB sekali
-func InitDB() *gorm.DB {
+// LoadConfig — panggil sekali dari main.go
+func LoadConfig() {
 	once.Do(func() {
-		dsn := cfg.DatabaseURL
-		var dial gorm.Dialector
-
-		low := strings.ToLower(dsn)
-		switch {
-		case strings.HasPrefix(low, "postgres://") || strings.HasPrefix(low, "postgresql://"):
-			log.Fatal("PostgreSQL belum didukung")
-		case strings.HasSuffix(low, ".db") || strings.HasPrefix(low, "sqlite://"):
-			log.Fatal("SQLite belum didukung")
-		default:
-			dial = mysql.Open(dsn)
+		viper.SetConfigFile(".env")
+		if err := viper.ReadInConfig(); err != nil {
+			log.Fatalf("Error reading .env file: %v", err)
 		}
 
+		instance = &Config{
+			DatabaseURL: viper.GetString("DATABASE_URL"),
+			JWTSecret:   viper.GetString("JWT_SECRET"),
+			SMTPHost:    viper.GetString("SMTP_HOST"),
+			SMTPPort:    viper.GetString("SMTP_PORT"),
+			SMTPUser:    viper.GetString("SMTP_USER"),
+			SMTPPass:    viper.GetString("SMTP_PASS"),
+		}
+
+		log.Println("Config loaded successfully")
+		log.Printf("SMTP Config: %s:%s → %s", instance.SMTPHost, instance.SMTPPort, instance.SMTPUser)
+	})
+}
+
+// GetConfig — aman dipanggil kapan saja setelah LoadConfig()
+func GetConfig() *Config {
+	if instance == nil {
+		log.Fatal("Config belum di-load! Panggil config.LoadConfig() dulu")
+	}
+	return instance
+}
+
+// InitDB — inisialisasi DB sekali
+func InitDB() *gorm.DB {
+	dbOnce.Do(func() {
+		dsn := GetConfig().DatabaseURL
 		var err error
-		db, err = gorm.Open(dial, &gorm.Config{})
+		db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 		if err != nil {
-			log.Fatalf("failed to connect database: %v", err)
+			log.Fatalf("Gagal konek database: %v", err)
 		}
+		log.Println("Database connected!")
 	})
 	return db
 }
 
-// GetDB mengembalikan instance DB
+// GetDB — untuk dipakai di handler kalau perlu
 func GetDB() *gorm.DB {
 	if db == nil {
 		return InitDB()

@@ -19,6 +19,7 @@ type galleryService struct{ repo repohotel.GalleryRepository }
 func NewGalleryService(repo repohotel.GalleryRepository) GalleryService { return &galleryService{repo} }
 
 func (s *galleryService) Create(item *hotel.Gallery) error                 { return s.repo.Create(item) }
+
 func (s *galleryService) GetByID(id uint) (*hotel.Gallery, error)          { return s.repo.FindByID(id) }
 func (s *galleryService) Delete(id uint) error                             { return s.repo.Delete(id) }
 func (s *galleryService) Save(item *hotel.Gallery) error                   { return s.repo.Update(item) }
