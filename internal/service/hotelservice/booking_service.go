@@ -231,7 +231,7 @@ Subtotal Kamar : Rp%s × %d kamar × %d malam = *Rp%s*`,
 Catatan:
 %s
 
-Mohon segera konfirmasi ke tamu.
+Jika Sudah bayar Silahkan Kirimkan Bukti Pembayaran untuk melakukan Konfirmasi.
 Terima kasih`,
 		formatRupiah(totalPrice),
 		req.Notes,
