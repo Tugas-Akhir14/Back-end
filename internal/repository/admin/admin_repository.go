@@ -3,8 +3,10 @@ package admin
 
 import (
 	"backend/internal/models/auth"
-	"gorm.io/gorm"
 	"errors"
+	"time"
+
+	"gorm.io/gorm"
 )
 
 type AdminRepository interface {
@@ -14,6 +16,9 @@ type AdminRepository interface {
 	Approve(id uint) error
 	GetPending() ([]auth.Admin, error)
 	Update(admin *auth.Admin) error
+	SaveOTP(email, otp string, expiresAt time.Time) error
+    VerifyOTP(email, otp string) (bool, error)
+    DeleteOTP(email string) error
 }
 
 type adminRepository struct {
@@ -64,4 +69,25 @@ func (r *adminRepository) GetPending() ([]auth.Admin, error) {
 
 func (r *adminRepository) Update(admin *auth.Admin) error {
 	return r.db.Save(admin).Error
+}
+
+func (r *adminRepository) SaveOTP(email, otp string, expiresAt time.Time) error {
+	r.db.Where("email = ?", email).Delete(&auth.GuestOTP{})
+	return r.db.Create(&auth.GuestOTP{Email: email, OTP: otp, ExpiresAt: expiresAt}).Error
+}
+
+func (r *adminRepository) VerifyOTP(email, otp string) (bool, error) {
+	var record auth.GuestOTP
+	err := r.db.Where("email = ? AND otp = ? AND expires_at > NOW()", email, otp).First(&record).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *adminRepository) DeleteOTP(email string) error {
+	return r.db.Where("email = ?", email).Delete(&auth.GuestOTP{}).Error
 }

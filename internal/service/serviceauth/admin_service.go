@@ -5,11 +5,16 @@ import (
 	// HAPUS INI: "backend/internal/config"
 	"backend/internal/models/auth"
 	"backend/internal/repository/admin"
+	"backend/utils"
+	"crypto/rand"
 	"errors"
+	"log"
+	"math/big"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 type RegisterRequest struct {
@@ -46,49 +51,120 @@ type AdminService interface {
 	GetPendingAdmins(requesterRole auth.Role) ([]auth.AdminResponse, error)
 	UpdateProfile(id uint, req *UpdateProfileRequest) (*auth.AdminResponse, error)
 	ChangePassword(id uint, req *ChangePasswordRequest) error
+	VerifyGuestOTP(email, otp string) error
 }
 
 type adminService struct {
 	repo      admin.AdminRepository
+	db		  *gorm.DB
 	jwtSecret string
 }
 
-func NewAdminService(repo admin.AdminRepository, jwtSecret string) AdminService {
-	return &adminService{repo, jwtSecret}
+// DIUBAH: tambah parameter db
+func NewAdminService(repo admin.AdminRepository, db *gorm.DB, jwtSecret string) AdminService {
+	return &adminService{repo: repo, db: db, jwtSecret: jwtSecret}
+}
+
+// Helper generate OTP 6 digit
+func generateOTP() string {
+	const digits = "0123456789"
+	otp := make([]byte, 6)
+	for i := range otp {
+		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(digits))))
+		otp[i] = digits[n.Int64()]
+	}
+	return string(otp)
 }
 
 func (s *adminService) Register(req *RegisterRequest) (*auth.AdminResponse, error) {
-	if req.Role == auth.RoleSuperAdmin {
-		return nil, errors.New("superadmin hanya bisa dibuat dari seeder")
-	}
+    if req.Role == auth.RoleSuperAdmin {
+        return nil, errors.New("superadmin hanya bisa dibuat dari seeder")
+    }
 
-	if existing, _ := s.repo.FindByEmail(req.Email); existing != nil {
-		return nil, errors.New("email sudah digunakan")
-	}
+    // Cek email sudah ada
+    if existing, _ := s.repo.FindByEmail(req.Email); existing != nil {
+        // Kalau guest dan email sudah ada → hanya kirim OTP baru
+        if req.Role == auth.RoleGuest && existing.Role == auth.RoleGuest {
+            otp := generateOTP()
+            expiresAt := time.Now().Add(5 * time.Minute)
 
-	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, err
-	}
+            // PASTIKAN INI ADA: SaveOTP
+            if err := s.repo.SaveOTP(req.Email, otp, expiresAt); err != nil {
+                log.Printf("Gagal simpan OTP: %v", err)
+            } else {
+                go utils.SendGuestOTPEmail(req.Email, existing.FullName, otp)
+            }
+            return toResponse(existing), nil
+        }
+        return nil, errors.New("email sudah digunakan")
+    }
 
-	isApproved := req.Role == auth.RoleGuest
+    hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+    if err != nil {
+        return nil, err
+    }
 
-	admin := &auth.Admin{
-		FullName:    req.FullName,
-		Email:       req.Email,
-		PhoneNumber: req.PhoneNumber,
-		Password:    string(hashed),
-		Role:        req.Role,
-		IsApproved:  isApproved,
-	}
+    isApproved := req.Role != auth.RoleGuest // guest butuh OTP, yang lain butuh approve
 
-	if err := s.repo.Create(admin); err != nil {
-		return nil, err
-	}
+    admin := &auth.Admin{
+        FullName:    req.FullName,
+        Email:       req.Email,
+        PhoneNumber: req.PhoneNumber,
+        Password:    string(hashed),
+        Role:        req.Role,
+        IsApproved:  isApproved,
+    }
 
-	return toResponse(admin), nil
+    if err := s.repo.Create(admin); err != nil {
+        return nil, err
+    }
+
+    // Kirim OTP untuk guest
+    if req.Role == auth.RoleGuest {
+        otp := generateOTP()
+        expiresAt := time.Now().Add(5 * time.Minute)
+
+        // INI YANG WAJIB ADA!
+        if err := s.repo.SaveOTP(req.Email, otp, expiresAt); err != nil {
+            log.Printf("GAGAL SIMPAN OTP: %v", err)
+        } else {
+            log.Printf("OTP berhasil disimpan dan dikirim ke %s", req.Email)
+            go utils.SendGuestOTPEmail(req.Email, req.FullName, otp)
+        }
+    } else {
+        go utils.SendApprovalPendingEmail(admin.Email, admin.FullName)
+    }
+
+    return toResponse(admin), nil
 }
 
+func (s *adminService) VerifyGuestOTP(email, otp string) error {
+	ok, err := s.repo.VerifyOTP(email, otp)
+	if err != nil || !ok {
+		return errors.New("OTP salah atau sudah kadaluarsa")
+	}
+
+	var admin auth.Admin
+	if err := s.db.Where("email = ?", email).First(&admin).Error; err != nil {
+		return errors.New("akun tidak ditemukan")
+	}
+
+	if admin.Role != auth.RoleGuest {
+		return errors.New("hanya guest yang perlu verifikasi OTP")
+	}
+	if admin.IsApproved {
+		return errors.New("akun sudah aktif")
+	}
+
+	// Approve akun
+	if err := s.db.Model(&admin).Update("is_approved", true).Error; err != nil {
+		return err
+	}
+
+	s.repo.DeleteOTP(email)
+	go utils.SendApprovalSuccessEmail(email, admin.FullName)
+	return nil
+}
 func (s *adminService) Login(email, password string) (*LoginResponse, error) {
 	admin, err := s.repo.FindByEmail(email)
 	if err != nil || admin == nil {
@@ -99,8 +175,14 @@ func (s *adminService) Login(email, password string) (*LoginResponse, error) {
 		return nil, errors.New("email atau password salah")
 	}
 
-	if admin.Role != auth.RoleGuest && admin.Role != auth.RoleSuperAdmin && !admin.IsApproved {
-		return nil, errors.New("akun Anda belum disetujui oleh Superadmin")
+	// PERBAIKAN DI SINI: Guest SEKARANG WAJIB IsApproved = true
+	if !admin.IsApproved {
+		// Hanya superadmin yang boleh login tanpa approval
+		if admin.Role == auth.RoleSuperAdmin {
+			// superadmin boleh langsung login
+		} else {
+			return nil, errors.New("akun Anda belum diverifikasi. Silakan cek email untuk kode OTP.")
+		}
 	}
 
 	token, err := s.generateToken(admin.ID, admin.Role)

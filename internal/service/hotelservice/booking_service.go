@@ -54,9 +54,7 @@ func NewBookingService(bookingRepo repohotel.BookingRepository, roomRepo repohot
 	}
 }
 
-// ==================================================================
-// CREATE BOOKING – BISA 1 SAMPAI N KAMAR SEKALIGUS
-// ==================================================================
+
 func (s *bookingService) CreateWithUser(userID uint, req hotel.CreateBookingRequest) (*hotel.MultiBookingResponse, error) {
 	// Validasi jumlah tamu
 	maxGuests := req.Rooms * MAX_GUESTS_PER_ROOM
@@ -169,7 +167,7 @@ func (s *bookingService) CreateWithUser(userID uint, req hotel.CreateBookingRequ
 	}, nil
 }
 
-// GANTI SELURUH FUNGSI INI (di booking_service.go)
+
 func (s *bookingService) generateWhatsAppURLMulti(
 	req hotel.CreateBookingRequest,
 	avail hotel.AvailabilityResponse,

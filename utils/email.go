@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/smtp"
+	"os"
 
 	"backend/internal/config"
 )
@@ -92,6 +93,48 @@ func SendApprovalSuccessEmail(to, name string) {
 			log.Printf("[EMAIL GAGAL] %s → %v", to, err)
 		} else {
 			log.Printf("[EMAIL BERHASIL] → %s (Approved)", to)
+		}
+	}()
+}
+
+// BARU: kirim OTP ke guest
+func SendGuestOTPEmail(toEmail, fullName, otp string) {
+	from := os.Getenv("SMTP_USER")
+	pass := os.Getenv("SMTP_PASS")
+	smtpHost := os.Getenv("SMTP_HOST")
+	smtpPort := os.Getenv("SMTP_PORT")
+
+	if from == "" || pass == "" {
+		log.Println("SMTP tidak dikonfigurasi, OTP tidak dikirim")
+		return
+	}
+
+	msg := fmt.Sprintf(`From: %s
+To: %s
+Subject: Kode Verifikasi Akun Guest
+
+Halo %s,
+
+Terima kasih telah mendaftar sebagai Guest.
+
+Kode OTP Anda adalah: <b>%s</b>
+
+Kode ini berlaku selama 5 menit.
+
+Jika Anda tidak mendaftar, abaikan email ini.
+
+Terima kasih,
+Tim Wisata
+`, from, toEmail, fullName, otp)
+
+	auth := smtp.PlainAuth("", from, pass, smtpHost)
+	addr := smtpHost + ":" + smtpPort
+
+	go func() {
+		if err := smtp.SendMail(addr, auth, from, []string{toEmail}, []byte(msg)); err != nil {
+			log.Printf("Gagal kirim OTP ke %s: %v", toEmail, err)
+		} else {
+			log.Printf("OTP berhasil dikirim ke %s", toEmail)
 		}
 	}()
 }

@@ -26,25 +26,27 @@ func (h *AdminHandler) Register(c *gin.Context) {
 		return
 	}
 
-	admin, err := h.service.Register(&req)
+	// Pastikan service Register return *auth.AdminResponse
+	adminResp, err := h.service.Register(&req)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Kirim email jika perlu approval
-	if !admin.IsApproved && admin.Role != "guest" {
-		go utils.SendApprovalPendingEmail(admin.Email, admin.FullName)
+	// PESAN YANG BENAR SESUAI ROLE
+	var message string
+	if req.Role == auth.RoleGuest {
+		message = "Registrasi berhasil! Silakan cek email Anda untuk kode OTP (berlaku 5 menit)."
+	} else {
+		message = "Registrasi berhasil. Menunggu persetujuan Superadmin."
 	}
 
-	msg := "Registrasi berhasil."
-	if !admin.IsApproved {
-		msg += " Menunggu persetujuan Superadmin."
-	}
-
-	c.JSON(http.StatusCreated, gin.H{"message": msg, "data": admin})
+	// PENTING: KIRIM adminResp (AdminResponse), BUKAN model admin mentah!
+	c.JSON(http.StatusCreated, gin.H{
+		"message": message,
+		"data":    adminResp, // Ini yang aman & sesuai frontend
+	})
 }
-
 
 
 func (h *AdminHandler) Login(c *gin.Context) {
@@ -143,4 +145,26 @@ func (h *AdminHandler) ChangePassword(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Password berhasil diubah"})
+}
+
+// Tambah method baru di AdminHandler
+func (h *AdminHandler) VerifyOTP(c *gin.Context) {
+    var req struct {
+        Email string `json:"email" binding:"required,email"`
+        OTP   string `json:"otp" binding:"required,len=6"`
+    }
+
+    if err := c.ShouldBindJSON(&req); err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+        return
+    }
+
+    if err := h.service.VerifyGuestOTP(req.Email, req.OTP); err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+        return
+    }
+
+    c.JSON(http.StatusOK, gin.H{
+        "message": "OTP berhasil diverifikasi! Akun guest Anda sudah aktif dan bisa login.",
+    })
 }

@@ -90,6 +90,9 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 	// === PUBLIC API ===
 	public := r.Group("/public")
 	{
+		
+		public.POST("/verify-otp", adm.VerifyOTP)
+
 		public.GET("/rooms", roomH.ListPublic)
 		public.GET("/gallery", galleryH.ListPublic)
 		public.GET("/gallery/:id", galleryH.GetByID)

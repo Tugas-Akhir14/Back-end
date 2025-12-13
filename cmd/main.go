@@ -46,7 +46,7 @@ func main() {
 		&souvenir.Product{}, &souvenir.Category{},&hotel.GuestReview{},
 		&book.ProductBook{}, &book.CategoryBook{},
 		&cafe.ProductCafe{}, &cafe.CategoryCafe{},
-		&hotel.GuestReview{}, &hotel.Booking{},
+		&hotel.GuestReview{}, &hotel.Booking{}, &auth.GuestOTP{},
 	); err != nil {
 		log.Fatalf("AutoMigrate failed: %v", err)
 	}
@@ -62,8 +62,8 @@ func main() {
 	seedSuperAdmin(db)
 
 	// === REPO & SERVICE ===
-	adminRepo := admin.NewAdminRepository(db)
-	adminService := serviceauth.NewAdminService(adminRepo, config.GetConfig().JWTSecret)
+adminRepo := admin.NewAdminRepository(db)
+adminService := serviceauth.NewAdminService(adminRepo, db, config.GetConfig().JWTSecret)
 
 	// === GIN SETUP ===
 	r := gin.Default()
