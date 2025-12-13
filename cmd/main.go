@@ -58,12 +58,21 @@ func main() {
 		log.Println("Kolom user_id ditambahkan ke tabel bookings")
 	}
 
+	// Tambahkan kolom source dan ota_reference jika belum ada
+	if !db.Migrator().HasColumn(&hotel.Booking{}, "source") {
+		db.Exec("ALTER TABLE bookings ADD COLUMN source VARCHAR(20) NOT NULL DEFAULT 'web'")
+		log.Println("Kolom source ditambahkan ke tabel bookings")
+	}
+	if !db.Migrator().HasColumn(&hotel.Booking{}, "ota_reference") {
+		db.Exec("ALTER TABLE bookings ADD COLUMN ota_reference VARCHAR(100)")
+		log.Println("Kolom ota_reference ditambahkan ke tabel bookings")
+	}
 
 	seedSuperAdmin(db)
 
 	// === REPO & SERVICE ===
-adminRepo := admin.NewAdminRepository(db)
-adminService := serviceauth.NewAdminService(adminRepo, db, config.GetConfig().JWTSecret)
+	adminRepo := admin.NewAdminRepository(db)
+	adminService := serviceauth.NewAdminService(adminRepo, db, config.GetConfig().JWTSecret)
 
 	// === GIN SETUP ===
 	r := gin.Default()
@@ -205,4 +214,4 @@ func seedSuperAdmin(db *gorm.DB) {
 			log.Println("Superadmin berhasil dibuat: supperpedrooo@gmail.com")
 		}
 	}
-}
+}	

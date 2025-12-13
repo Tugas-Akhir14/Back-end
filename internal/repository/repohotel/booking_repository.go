@@ -25,6 +25,7 @@ type BookingRepository interface {
 
 type BookingFilter struct {
 	Status string
+	Source string // Tambah source filter
 	Limit  int
 	Offset int
 }
@@ -60,6 +61,9 @@ func (r *bookingRepository) List(f BookingFilter) ([]hotel.Booking, int64, error
 
 	if f.Status != "" {
 		query = query.Where("status = ?", f.Status)
+	}
+	if f.Source != "" {
+		query = query.Where("source = ?", f.Source)
 	}
 
 	if err := query.Count(&count).Error; err != nil {

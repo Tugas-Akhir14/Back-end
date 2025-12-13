@@ -30,7 +30,7 @@ func NewBookingHandler(service hotelservice.BookingService) *BookingHandler {
 }
 
 // ==================================================================
-// CREATE BOOKING – BISA 1 SAMPAI N KAMAR SEKALIGUS
+// CREATE BOOKING – BISA 1 SAMPAI N KAMAR SEKALIGUS (UNTUK GUEST, SOURCE WEB)
 // ==================================================================
 func (h *BookingHandler) Create(c *gin.Context) {
 	userID, exists := c.Get("user_id")
@@ -58,7 +58,7 @@ func (h *BookingHandler) Create(c *gin.Context) {
 	}
 	req.Phone = phone // normalisasi
 
-	resp, err := h.service.CreateWithUser(uid, req)
+	resp, err := h.service.Create(uid, req, hotel.SourceWeb, "", hotel.BookingStatusPending)
 	if err != nil {
 		h.handleError(c, err)
 		return
@@ -68,9 +68,59 @@ func (h *BookingHandler) Create(c *gin.Context) {
 }
 
 // ==================================================================
-// HAPUS GuestBook → TIDAK DIPERLUKAN LAGI
+// CREATE MANUAL BOOKING – UNTUK ADMIN HOTEL (ONSITE/OTA)
 // ==================================================================
-// Fungsi ini sudah dihapus karena semua booking pakai CreateWithUser
+func (h *BookingHandler) CreateManual(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		h.unauthorized(c, "token tidak valid")
+		return
+	}
+	uid, ok := userID.(uint)
+	if !ok {
+		h.unauthorized(c, "user id tidak valid")
+		return
+	}
+
+	var req hotel.CreateManualBookingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.badRequest(c, "data tidak valid: "+err.Error())
+		return
+	}
+
+	// Normalisasi phone jika ada
+	if req.Phone != "" {
+		phone := strings.ReplaceAll(req.Phone, " ", "")
+		if !strings.HasPrefix(phone, "62") {
+			h.badRequest(c, "nomor WhatsApp harus diawali 62 (contoh: 6281234567890)")
+			return
+		}
+		req.Phone = phone
+	}
+
+	status := hotel.BookingStatusPending
+	if req.Status != "" {
+		status = hotel.BookingStatus(req.Status)
+	}
+
+	resp, err := h.service.Create(uid, hotel.CreateBookingRequest{
+		RoomType: req.RoomType,
+		Rooms:    req.Rooms,
+		Name:     req.Name,
+		Phone:    req.Phone,
+		Email:    req.Email,
+		CheckIn:  req.CheckIn,
+		CheckOut: req.CheckOut,
+		Guests:   req.Guests,
+		Notes:    req.Notes,
+	}, hotel.BookingSource(req.Source), req.OtaReference, status)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	h.created(c, resp)
+}
 
 // ==================================================================
 // CEK KETERSEDIAAN KAMAR
@@ -111,6 +161,7 @@ func (h *BookingHandler) CheckAvailability(c *gin.Context) {
 // ==================================================================
 func (h *BookingHandler) List(c *gin.Context) {
 	status := c.Query("status")
+	source := c.Query("source") // Tambah filter source
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 	if limit <= 0 || limit > 100 {
 		limit = 10
@@ -120,7 +171,7 @@ func (h *BookingHandler) List(c *gin.Context) {
 		offset = 0
 	}
 
-	bookings, total, err := h.service.List(status, limit, offset)
+	bookings, total, err := h.service.List(status, source, limit, offset)
 	if err != nil {
 		h.internalError(c, err.Error())
 		return

@@ -21,10 +21,10 @@ const (
 )
 
 type BookingService interface {
-	CreateWithUser(userID uint, req hotel.CreateBookingRequest) (*hotel.MultiBookingResponse, error)
+	Create(userID uint, req hotel.CreateBookingRequest, source hotel.BookingSource, otaRef string, initialStatus hotel.BookingStatus) (*hotel.MultiBookingResponse, error)
 	Confirm(id uint) error
 	Cancel(id uint) error
-	List(status string, limit, offset int) ([]hotel.Booking, int64, error)
+	List(status, source string, limit, offset int) ([]hotel.Booking, int64, error)
 	CheckAvailability(checkIn, checkOut time.Time, roomType string) ([]hotel.AvailabilityResponse, error)
 	Update(userID, bookingID uint, req hotel.UpdateBookingRequest) (*hotel.BookingResponse, error)
 	UpdateStatus(bookingID uint, newStatus hotel.BookingStatus) error
@@ -55,7 +55,7 @@ func NewBookingService(bookingRepo repohotel.BookingRepository, roomRepo repohot
 }
 
 
-func (s *bookingService) CreateWithUser(userID uint, req hotel.CreateBookingRequest) (*hotel.MultiBookingResponse, error) {
+func (s *bookingService) Create(userID uint, req hotel.CreateBookingRequest, source hotel.BookingSource, otaRef string, initialStatus hotel.BookingStatus) (*hotel.MultiBookingResponse, error) {
 	// Validasi jumlah tamu
 	maxGuests := req.Rooms * MAX_GUESTS_PER_ROOM
 	if req.Guests > maxGuests {
@@ -133,34 +133,48 @@ func (s *bookingService) CreateWithUser(userID uint, req hotel.CreateBookingRequ
 	var bookingIDs []uint
 	for _, room := range rooms {
 		booking := &hotel.Booking{
-			RoomID:      room.ID,
-			UserID:      &userID,
-			Name:        req.Name,
-			Phone:       req.Phone,
-			Email:       req.Email,
-			CheckIn:     checkIn,
-			CheckOut:    checkOut,
-			Guests:      req.Guests,
-			Rooms:       req.Rooms,
-			TotalNights: nights,
-			TotalPrice:  totalPrice,
-			ExtraGuests: totalExtraGuests,
-			ExtraCharge: extraCharge,
-			Status:      hotel.BookingStatusPending,
-			Notes:       req.Notes,
+			RoomID:       room.ID,
+			UserID:       &userID,
+			Name:         req.Name,
+			Phone:        req.Phone,
+			Email:        req.Email,
+			CheckIn:      checkIn,
+			CheckOut:     checkOut,
+			Guests:       req.Guests,
+			Rooms:        req.Rooms,
+			TotalNights:  nights,
+			TotalPrice:   totalPrice,
+			ExtraGuests:  totalExtraGuests,
+			ExtraCharge:  extraCharge,
+			Status:       initialStatus,
+			Notes:        req.Notes,
+			Source:       source,
+			OtaReference: otaRef,
 		}
 		if err := tx.Create(booking).Error; err != nil {
 			tx.Rollback()
 			return nil, err
 		}
 		bookingIDs = append(bookingIDs, booking.ID)
+
+		// Jika initial status bukan pending, update room status
+		if initialStatus != hotel.BookingStatusPending {
+			if err := s.updateRoomStatus(tx, booking, room); err != nil {
+				tx.Rollback()
+				return nil, err
+			}
+		}
 	}
 
 	if err := tx.Commit().Error; err != nil {
 		return nil, err
 	}
 
-	waURL := s.generateWhatsAppURLMulti(req, avail[0], nights, totalPrice, int64(totalExtraGuests), checkIn, checkOut)
+	var waURL string
+	if source == hotel.SourceWeb {
+		waURL = s.generateWhatsAppURLMulti(req, avail[0], nights, totalPrice, int64(totalExtraGuests), checkIn, checkOut)
+	} // Untuk OTA/onsite, tidak generate WA URL, atau generate different jika perlu
+
 	return &hotel.MultiBookingResponse{
 		BookingIDs:  bookingIDs,
 		WhatsAppURL: waURL,
@@ -414,8 +428,8 @@ func (s *bookingService) Cancel(id uint) error {
 	return tx.Commit().Error
 }
 
-func (s *bookingService) List(status string, limit, offset int) ([]hotel.Booking, int64, error) {
-	f := repohotel.BookingFilter{Status: status, Limit: limit, Offset: offset}
+func (s *bookingService) List(status, source string, limit, offset int) ([]hotel.Booking, int64, error) {
+	f := repohotel.BookingFilter{Status: status, Source: source, Limit: limit, Offset: offset}
 	return s.bookingRepo.List(f)
 }
 
@@ -471,6 +485,18 @@ func (s *bookingService) isValidStatusTransition(from, to hotel.BookingStatus) b
 
 func (s *bookingService) GetMyBookings(userID uint, limit, offset int) ([]hotel.Booking, int64, error) {
 	return s.bookingRepo.GetByUserID(userID, limit, offset)
+}
+
+// Helper untuk update room status di create jika initial != pending
+func (s *bookingService) updateRoomStatus(tx *gorm.DB, b *hotel.Booking, room hotel.Room) error {
+	switch b.Status {
+	case hotel.BookingStatusConfirmed, hotel.BookingStatusCheckedIn:
+		room.Status = hotel.RoomStatusBooked
+		if err := tx.Save(&room).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ==================================================================

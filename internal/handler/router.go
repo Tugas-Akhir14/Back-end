@@ -188,11 +188,12 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
     	hotelGroup.DELETE("/reviews/:id", reviewH.Delete) 
 		// Admin
 		hotelGroup.GET("/bookings", bookingH.List)
+		hotelGroup.POST("/bookings", bookingH.CreateManual) // Tambah endpoint manual create
 		hotelGroup.PATCH("/bookings/:id/confirm", bookingH.Confirm)
 		hotelGroup.PATCH("/bookings/:id/cancel", bookingH.Cancel)
 		hotelGroup.PATCH("/bookings/:id/status", bookingH.UpdateStatus)
 	}
-
+	
 	
 	// SOUVENIR
 	souvenirGroup := adminGroup.Group("", middleware.RoleMiddleware(auth.RoleAdminSouvenir, auth.RoleSuperAdmin))

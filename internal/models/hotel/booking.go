@@ -17,36 +17,40 @@ const (
     BookingStatusCheckedOut BookingStatus = "checked_out"
 )
 
-type Booking struct {
-    ID          uint            `gorm:"primaryKey" json:"id"`
-    RoomID      uint            `gorm:"not null;index" json:"room_id"`
-    UserID      *uint           `json:"user_id,omitempty"`
-    Room        Room            `gorm:"foreignKey:RoomID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT" json:"room,omitempty"`
-    Name        string          `gorm:"size:100;not null" json:"name"`
-    Phone       string          `gorm:"size:20;not null" json:"phone"`
-    Email       string          `gorm:"size:100" json:"email"`
-    CheckIn     time.Time       `gorm:"not null" json:"check_in"`
-    CheckOut    time.Time       `gorm:"not null" json:"check_out"`
-    Guests      int             `gorm:"not null" json:"guests"`           // TOTAL TAMU (semua kamar)
-    Rooms       int             `gorm:"not null;default:1" json:"rooms"`  // JUMLAH KAMAR YANG DIPESAN
-    TotalNights int             `gorm:"not null" json:"total_nights"`
-    TotalPrice  int64           `gorm:"not null" json:"total_price"`
-    ExtraGuests int             `gorm:"default:0" json:"extra_guests"`
-    ExtraCharge int64           `gorm:"default:0" json:"extra_charge"`
-    Status      BookingStatus   `gorm:"type:varchar(20);default:'pending';index" json:"status"`
-    Notes       string          `gorm:"type:text" json:"notes,omitempty"`
+type BookingSource string
 
-    // HAPUS KOLOM INI! GAK PERLU LAGI!
-    // ActiveRoomKey string `gorm:"column:active_room_key;type:varchar(50);uniqueIndex:idx_active_room_key" json:"-"`
+const (
+    SourceWeb       BookingSource = "web"
+    SourceOnsite    BookingSource = "onsite"
+    SourceTraveloka BookingSource = "traveloka"
+    SourceAgoda     BookingSource = "agoda"
+    SourceTiketCom  BookingSource = "tiket.com"
+)
+
+type Booking struct {
+    ID           uint           `gorm:"primaryKey" json:"id"`
+    RoomID       uint           `gorm:"not null;index" json:"room_id"`
+    UserID       *uint          `json:"user_id,omitempty"`
+    Room         Room           `gorm:"foreignKey:RoomID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT" json:"room,omitempty"`
+    Name         string         `gorm:"size:100;not null" json:"name"`
+    Phone        string         `gorm:"size:20;not null" json:"phone"`
+    Email        string         `gorm:"size:100" json:"email"`
+    CheckIn      time.Time      `gorm:"not null" json:"check_in"`
+    CheckOut     time.Time      `gorm:"not null" json:"check_out"`
+    Guests       int            `gorm:"not null" json:"guests"`           // TOTAL TAMU (semua kamar)
+    Rooms        int            `gorm:"not null;default:1" json:"rooms"`  // JUMLAH KAMAR YANG DIPESAN
+    TotalNights  int            `gorm:"not null" json:"total_nights"`
+    TotalPrice   int64          `gorm:"not null" json:"total_price"`
+    ExtraGuests  int            `gorm:"default:0" json:"extra_guests"`
+    ExtraCharge  int64          `gorm:"default:0" json:"extra_charge"`
+    Status       BookingStatus  `gorm:"type:varchar(20);default:'pending';index" json:"status"`
+    Notes        string         `gorm:"type:text" json:"notes,omitempty"`
+    Source       BookingSource  `gorm:"type:varchar(20);default:'web';index" json:"source"`
+    OtaReference string         `gorm:"size:100" json:"ota_reference,omitempty"`
 
     CreatedAt  time.Time      `json:"created_at"`
     UpdatedAt  time.Time      `json:"updated_at"`
     DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
-
-    // HOOKS: HAPUS LOGIC active_room_key (gak perlu lagi!)
-    // func (b *Booking) BeforeCreate(tx *gorm.DB) error { ... }
-    // func (b *Booking) BeforeUpdate(tx *gorm.DB) error { ... }
-    // func (b *Booking) AfterFind(tx *gorm.DB) error { ... }
 }
 
 // REQUEST STRUCTS (SESUAI BACKEND BARU)
@@ -55,11 +59,26 @@ type CreateBookingRequest struct {
     Rooms    int    `json:"rooms" binding:"required,gt=0"`
     Name     string `json:"name" binding:"required"`
     Phone    string `json:"phone" binding:"required"`
-    Email    string `json:"email" binding:"required,email"`
+    Email    string `json:"email" binding:"omitempty,email"`
     CheckIn  string `json:"check_in" binding:"required"`
     CheckOut string `json:"check_out" binding:"required"`
     Guests   int    `json:"guests" binding:"required,gt=0"`
     Notes    string `json:"notes,omitempty"`
+}
+
+type CreateManualBookingRequest struct {
+    RoomType     string `json:"room_type" binding:"required,oneof=superior deluxe executive"`
+    Rooms        int    `json:"rooms" binding:"required,gt=0"`
+    Name         string `json:"name" binding:"required"`
+    Phone        string `json:"phone" binding:"omitempty"`
+    Email        string `json:"email" binding:"omitempty,email"`
+    CheckIn      string `json:"check_in" binding:"required"`
+    CheckOut     string `json:"check_out" binding:"required"`
+    Guests       int    `json:"guests" binding:"required,gt=0"`
+    Notes        string `json:"notes,omitempty"`
+    Source       string `json:"source" binding:"required,oneof=onsite traveloka agoda tiket.com"`
+    OtaReference string `json:"ota_reference,omitempty"`
+    Status       string `json:"status" binding:"omitempty,oneof=pending confirmed checked_in"`
 }
 
 type BookingResponse struct {
