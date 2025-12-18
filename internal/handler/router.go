@@ -192,6 +192,9 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 		hotelGroup.PATCH("/bookings/:id/confirm", bookingH.Confirm)
 		hotelGroup.PATCH("/bookings/:id/cancel", bookingH.Cancel)
 		hotelGroup.PATCH("/bookings/:id/status", bookingH.UpdateStatus)
+
+		// === TAMBAHAN BARU: Check Availability untuk Admin Hotel ===
+		hotelGroup.GET("/availability", bookingH.CheckAvailability)
 	}
 	
 	
