@@ -324,7 +324,7 @@ func (s *bookingService) Update(userID, bookingID uint, req hotel.UpdateBookingR
 
 	extraGuests := max(0, guests-BASE_GUESTS_INCLUDED)
 	extraCharge := int64(extraGuests) * EXTRA_GUEST_PRICE * int64(nights)
-	totalPrice := int64(nights)*room.RoomType.Price + extraCharge
+	totalPrice := int64(nights)*room.RoomType.BasePrice + extraCharge
 
 	booking.CheckIn = newCheckIn
 	booking.CheckOut = newCheckOut

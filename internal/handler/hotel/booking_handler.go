@@ -115,7 +115,7 @@ func (h *BookingHandler) CreateManual(c *gin.Context) {
 		Notes:    req.Notes,
 	}, hotel.BookingSource(req.Source), req.OtaReference, status)
 	if err != nil {
-		h.handleError(c, err)
+		h.handleError(c, err)	
 		return
 	}
 

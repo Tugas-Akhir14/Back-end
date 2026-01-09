@@ -3,6 +3,7 @@ package hotelservice
 
 import (
 	"errors"
+	"time"
 
 	"backend/internal/models/hotel"
 	"backend/internal/repository/repohotel"
@@ -29,10 +30,18 @@ func (s *roomTypeService) Create(req hotel.CreateRoomTypeRequest) (*hotel.RoomTy
 		return nil, errors.New("room type already exists")
 	}
 
+	if err := validateDiscount(req.DiscountStart, req.DiscountEnd, req.DiscountPercentage); err != nil {
+		return nil, err
+	}
+
 	rt := &hotel.RoomType{
-		Type:        req.Type,
-		Price:       req.Price,
-		Description: req.Description,
+		Type:                req.Type,
+		BasePrice:           req.BasePrice,
+		DiscountPercentage:  req.DiscountPercentage,
+		DiscountStart:       req.DiscountStart,
+		DiscountEnd:         req.DiscountEnd,
+		DiscountDescription: req.DiscountDescription,
+		Description:         req.Description,
 	}
 
 	if err := s.repo.Create(rt); err != nil {
@@ -55,11 +64,27 @@ func (s *roomTypeService) Update(id uint, req hotel.UpdateRoomTypeRequest) (*hot
 		return nil, err
 	}
 
-	if req.Price != nil {
-		rt.Price = *req.Price
+	if req.BasePrice != nil {
+		rt.BasePrice = *req.BasePrice
+	}
+	if req.DiscountPercentage != nil {
+		rt.DiscountPercentage = *req.DiscountPercentage
+	}
+	if req.DiscountStart != nil {
+		rt.DiscountStart = req.DiscountStart
+	}
+	if req.DiscountEnd != nil {
+		rt.DiscountEnd = req.DiscountEnd
+	}
+	if req.DiscountDescription != nil {
+		rt.DiscountDescription = *req.DiscountDescription
 	}
 	if req.Description != nil {
 		rt.Description = *req.Description
+	}
+
+	if err := validateDiscount(rt.DiscountStart, rt.DiscountEnd, rt.DiscountPercentage); err != nil {
+		return nil, err
 	}
 
 	if err := s.repo.Update(rt); err != nil {
@@ -68,7 +93,6 @@ func (s *roomTypeService) Update(id uint, req hotel.UpdateRoomTypeRequest) (*hot
 	return rt, nil
 }
 
-// internal/service/hotelservice/room_type_service.go
 func (s *roomTypeService) Delete(id uint) error {
 	var count int64
 	impl := s.repo.(*repohotel.RoomTypeRepositoryImpl)
@@ -81,4 +105,16 @@ func (s *roomTypeService) Delete(id uint) error {
 	}
 
 	return s.repo.Delete(id)
+}
+
+func validateDiscount(start, end *time.Time, percentage float64) error {
+	if percentage > 0 {
+		if start == nil || end == nil {
+			return errors.New("discount start and end dates are required when percentage is set")
+		}
+		if start.After(*end) {
+			return errors.New("discount start date must be before end date")
+		}
+	}
+	return nil
 }

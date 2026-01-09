@@ -31,13 +31,13 @@ func (h *RoomTypeHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"data": rt})
+	c.JSON(http.StatusCreated, gin.H{"data": h.enrichWithCurrentPrice(rt)})
 }
 
 func (h *RoomTypeHandler) GetByID(c *gin.Context) {
 	idStr := c.Param("id")
-	id, _ := strconv.ParseUint(idStr, 10, 32)
-	if id == 0 {
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil || id == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
@@ -47,7 +47,10 @@ func (h *RoomTypeHandler) GetByID(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "room type not found"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": rt})
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": h.enrichWithCurrentPrice(rt),
+	})
 }
 
 func (h *RoomTypeHandler) List(c *gin.Context) {
@@ -56,13 +59,20 @@ func (h *RoomTypeHandler) List(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": types})
+
+	// Enrich setiap room type dengan current_price
+	var enriched []gin.H
+	for _, rt := range types {
+		enriched = append(enriched, h.enrichWithCurrentPrice(&rt))
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": enriched})
 }
 
 func (h *RoomTypeHandler) Update(c *gin.Context) {
 	idStr := c.Param("id")
-	id, _ := strconv.ParseUint(idStr, 10, 32)
-	if id == 0 {
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil || id == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
@@ -78,13 +88,14 @@ func (h *RoomTypeHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": rt})
+
+	c.JSON(http.StatusOK, gin.H{"data": h.enrichWithCurrentPrice(rt)})
 }
 
 func (h *RoomTypeHandler) Delete(c *gin.Context) {
 	idStr := c.Param("id")
-	id, _ := strconv.ParseUint(idStr, 10, 32)
-	if id == 0 {
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil || id == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
@@ -94,4 +105,21 @@ func (h *RoomTypeHandler) Delete(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "room type deleted"})
+}
+
+// Helper untuk menambahkan current_price tanpa mengubah struct asli
+func (h *RoomTypeHandler) enrichWithCurrentPrice(rt *hotel.RoomType) gin.H {
+	return gin.H{
+		"id":                     rt.ID,
+		"type":                   rt.Type,
+		"base_price":             rt.BasePrice,
+		"discount_percentage":    rt.DiscountPercentage,
+		"discount_start":         rt.DiscountStart,
+		"discount_end":           rt.DiscountEnd,
+		"discount_description":   rt.DiscountDescription,
+		"description":            rt.Description,
+		"created_at":             rt.CreatedAt,
+		"updated_at":             rt.UpdatedAt,
+		"current_price":          rt.GetCurrentPrice(), // ← Ini yang penting
+	}
 }
