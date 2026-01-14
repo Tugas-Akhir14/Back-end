@@ -45,7 +45,7 @@ func main() {
 		&hotel.Room{}, &hotel.Gallery{}, &hotel.News{}, &hotel.VisionMission{},
 		&souvenir.Product{}, &souvenir.Category{},&hotel.GuestReview{},
 		&book.ProductBook{}, &book.CategoryBook{},
-		&cafe.ProductCafe{}, &cafe.CategoryCafe{},
+		&cafe.ProductCafe{}, &cafe.CategoryCafe{},&cafe.OrderCafe{},&cafe.OrderItemCafe{},
 		&hotel.GuestReview{}, &hotel.Booking{}, &auth.GuestOTP{},
 	); err != nil {
 		log.Fatalf("AutoMigrate failed: %v", err)

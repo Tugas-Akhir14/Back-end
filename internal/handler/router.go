@@ -42,8 +42,6 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 	r.PATCH("/admins/profile", middleware.AuthMiddleware(), adm.UpdateProfile)
 	r.PATCH("/admins/profile/password", middleware.AuthMiddleware(), adm.ChangePassword)
 
-	
-
 	// === REPO & HANDLER ===
 	galleryH := hotel.NewGalleryHandler(hotelservice.NewGalleryService(repohotel.NewGalleryRepository(db)))
 	newsH := hotel.NewNewsHandler(hotelservice.NewNewsService(repohotel.NewNewsRepository(db)))
@@ -61,9 +59,11 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 	// CAFE
 	cafeProductRepo := repocafe.NewProductRepository(db)
 	cafeCategoryRepo := repocafe.NewCategoryRepository(db)
+	cafeOrderRepo := repocafe.NewOrderRepository(db)
 	cafeProductService := cafeservice.NewProductService(cafeProductRepo, cafeCategoryRepo)
+	cafeOrderService := cafeservice.NewOrderService(cafeOrderRepo, cafeProductRepo, db)
 	cafeProductH := cafehandler.NewProductHandler(cafeProductService, cafeservice.NewCategoryService(cafeCategoryRepo))
-
+	cafeOrderH := cafehandler.NewOrderHandler(cafeOrderService)
 	bookCategoryH := bookhandler.NewCategoryHandler(bookservice.NewCategoryService(bookCategoryRepo))
 	cafeCategoryH := cafehandler.NewCategoryHandler(cafeservice.NewCategoryService(cafeCategoryRepo))
 
@@ -77,8 +77,7 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 	bookingService := hotelservice.NewBookingService(bookingRepo, repohotel.NewRoomRepository(db), db)
 	bookingH := hotel.NewBookingHandler(bookingService)
 
-
-		// Di dalam SetupRoutes
+	// Di dalam SetupRoutes
 	roomRepo := repohotel.NewRoomRepository(db)
 	roomTypeRepo := repohotel.NewRoomTypeRepository(db)
 
@@ -90,24 +89,24 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 	// === PUBLIC API ===
 	public := r.Group("/public")
 	{
-		
+
 		public.POST("/verify-otp", adm.VerifyOTP)
 
 		public.GET("/rooms", roomH.ListPublic)
 		public.GET("/gallery", galleryH.ListPublic)
 		public.GET("/gallery/:id", galleryH.GetByID)
 		public.GET("/rooms/:id/gallery", galleryH.ListByRoom)
-		
+
 		public.GET("/news", newsH.ListPublic)
 		public.GET("/news/:id", newsH.GetPublicByID)
 		public.GET("/news/slug/:slug", newsH.GetPublicBySlug)
-		public.GET("/visi-misi", visionMissionH.GetPublic)		
-		
+		public.GET("/visi-misi", visionMissionH.GetPublic)
+
 		public.GET("/reviews", reviewH.GetAll)
-        public.POST("/reviews", middleware.AuthMiddleware(), middleware.RoleMiddleware(auth.RoleGuest), reviewH.Create)
-        public.GET("/reviews/me", middleware.AuthMiddleware(), middleware.RoleMiddleware(auth.RoleGuest), reviewH.GetMyReviews)
-        public.PUT("/reviews/:id", middleware.AuthMiddleware(), middleware.RoleMiddleware(auth.RoleGuest), reviewH.Update)
-        public.DELETE("/reviews/:id", middleware.AuthMiddleware(), reviewH.Delete)
+		public.POST("/reviews", middleware.AuthMiddleware(), middleware.RoleMiddleware(auth.RoleGuest), reviewH.Create)
+		public.GET("/reviews/me", middleware.AuthMiddleware(), middleware.RoleMiddleware(auth.RoleGuest), reviewH.GetMyReviews)
+		public.PUT("/reviews/:id", middleware.AuthMiddleware(), middleware.RoleMiddleware(auth.RoleGuest), reviewH.Update)
+		public.DELETE("/reviews/:id", middleware.AuthMiddleware(), reviewH.Delete)
 
 		public.GET("/souvenirs", souvenirProductH.ListPublic)
 		public.GET("/souvenirs/:id", souvenirProductH.GetPublicByID)
@@ -121,7 +120,7 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 		public.GET("/cafe/:id", cafeProductH.GetPublicByID)
 		public.GET("/cafe/category/:category_id", cafeProductH.GetPublicByCategory)
 
-	// Booking sebagai tamu (harus login)
+		// Booking sebagai tamu (harus login)
 		public.POST("/bookings",
 			middleware.AuthMiddleware(),
 			middleware.RoleMiddleware("guest"),
@@ -138,6 +137,8 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 			middleware.AuthMiddleware(),
 			middleware.RoleMiddleware("guest"),
 			bookingH.Update)
+
+		public.POST("/cafe/orders", cafeOrderH.CreateOrder)
 	}
 
 	// === ADMIN API ===
@@ -153,7 +154,7 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 	// HOTEL
 	hotelGroup := adminGroup.Group("", middleware.RoleMiddleware(auth.RoleAdminHotel, auth.RoleSuperAdmin))
 	{
-			// Room CRUD
+		// Room CRUD
 		hotelGroup.POST("/rooms", roomH.Create)
 		hotelGroup.GET("/rooms", roomH.List)
 		hotelGroup.GET("/rooms/:id", roomH.GetByID)
@@ -174,7 +175,7 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 		hotelGroup.PUT("/galleries/:id/image", galleryH.UpdateImage)
 		hotelGroup.DELETE("/galleries/:id", galleryH.Delete)
 
-		hotelGroup.GET("/news", newsH.List)	
+		hotelGroup.GET("/news", newsH.List)
 		hotelGroup.GET("/news/:id", newsH.GetByID)
 		hotelGroup.GET("/news/slug/:slug", newsH.GetBySlug)
 		hotelGroup.POST("/news", newsH.Create)
@@ -184,8 +185,8 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 		hotelGroup.GET("/visi-misi", visionMissionH.Get)
 		hotelGroup.PUT("/visi-misi", visionMissionH.Upsert)
 
-		hotelGroup.GET("/reviews", reviewH.GetAll)        
-    	hotelGroup.DELETE("/reviews/:id", reviewH.Delete) 
+		hotelGroup.GET("/reviews", reviewH.GetAll)
+		hotelGroup.DELETE("/reviews/:id", reviewH.Delete)
 		// Admin
 		hotelGroup.GET("/bookings", bookingH.List)
 		hotelGroup.POST("/bookings", bookingH.CreateManual) // Tambah endpoint manual create
@@ -196,8 +197,7 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 		// === TAMBAHAN BARU: Check Availability untuk Admin Hotel ===
 		hotelGroup.GET("/availability", bookingH.CheckAvailability)
 	}
-	
-	
+
 	// SOUVENIR
 	souvenirGroup := adminGroup.Group("", middleware.RoleMiddleware(auth.RoleAdminSouvenir, auth.RoleSuperAdmin))
 	{
@@ -244,5 +244,11 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 		cafeGroup.GET("/cafe-products", cafeProductH.ListProducts)
 		cafeGroup.GET("/cafe-products/:id", cafeProductH.GetProduct)
 		cafeGroup.GET("/cafe-categories/:category_id/products", cafeProductH.GetProductsByCategory)
+
+		cafeGroup.GET("/orders", cafeOrderH.ListOrders)
+		cafeGroup.GET("/orders/:id", cafeOrderH.GetOrder)
+		cafeGroup.PATCH("/orders/:id", cafeOrderH.UpdateOrder)
+		cafeGroup.PATCH("/orders/:id/confirm-payment", cafeOrderH.ConfirmPayment)
+	    cafeGroup.PATCH("/orders/:id/cancel", cafeOrderH.CancelOrder)
 	}
 }
