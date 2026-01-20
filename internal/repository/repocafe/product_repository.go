@@ -42,8 +42,11 @@ func (r *productRepository) FindByID(id uint) (*cafe.ProductCafe, error) {
 }
 
 func (r *productRepository) Update(product *cafe.ProductCafe) error {
-    return r.db.Save(product).Error
+	return r.db.Model(&cafe.ProductCafe{}).
+		Where("id = ?", product.ID).
+		Updates(product).Error
 }
+
 
 func (r *productRepository) Delete(id uint) error {
     return r.db.Delete(&cafe.ProductCafe{}, id).Error

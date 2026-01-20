@@ -1,8 +1,9 @@
 package bookservice
 
 import (
-    "backend/internal/models/book"
-    "backend/internal/repository/repobook"
+	"backend/internal/models/book"
+	"backend/internal/repository/repobook"
+	"fmt"
 )
 
 type ProductService interface {
@@ -52,38 +53,53 @@ func (s *productService) GetByID(id uint) (*book.ProductBook, error) {
 }
 
 func (s *productService) Update(id uint, input book.ProductBookUpdate) (*book.ProductBook, error) {
-    product, err := s.repo.FindByID(id)
-    if err != nil {
-        return nil, err
-    }
+	product, err := s.repo.FindByID(id)
+	if err != nil {
+		return nil, fmt.Errorf("produk tidak ditemukan")
+	}
 
-    // Update hanya field yang dikirim
-    if input.Nama != nil {
-        product.Nama = *input.Nama
-    }
-    if input.Deskripsi != nil {
-        product.Deskripsi = *input.Deskripsi
-    }
-    if input.Harga != nil {
-        product.Harga = *input.Harga
-    }
-    if input.Stok != nil {
-        product.Stok = *input.Stok
-    }
-    if input.Gambar != nil {
-        product.Gambar = *input.Gambar
-    }
-    if input.CategoryID != nil {
-        if _, err := s.categoryRepo.FindByID(*input.CategoryID); err != nil {
-            return nil, err
-        }
-        product.CategoryID = *input.CategoryID
-    }
+	updated := false
 
-    if err := s.repo.Update(product); err != nil {
-        return nil, err
-    }
-    return s.repo.FindByID(id)
+	if input.Nama != nil && *input.Nama != product.Nama {
+		product.Nama = *input.Nama
+		updated = true
+	}
+	if input.Deskripsi != nil && *input.Deskripsi != product.Deskripsi {
+		product.Deskripsi = *input.Deskripsi
+		updated = true
+	}
+	if input.Harga != nil && *input.Harga != product.Harga {
+		product.Harga = *input.Harga
+		updated = true
+	}
+	if input.Stok != nil && *input.Stok != product.Stok {
+		product.Stok = *input.Stok
+		updated = true
+	}
+	if input.Gambar != nil && *input.Gambar != product.Gambar {
+		// Optional: hapus file lama jika perlu
+		// os.Remove("." + product.Gambar) // uncomment jika ingin hapus file lama
+		product.Gambar = *input.Gambar
+		updated = true
+	}
+	if input.CategoryID != nil && *input.CategoryID != product.CategoryID {
+		// Validasi kategori
+		if _, err := s.categoryRepo.FindByID(*input.CategoryID); err != nil {
+			return nil, fmt.Errorf("kategori tidak ditemukan")
+		}
+		product.CategoryID = *input.CategoryID
+		updated = true
+	}
+
+	// Hanya lakukan save jika ada perubahan
+	if updated {
+		if err := s.repo.Update(product); err != nil {
+			return nil, err
+		}
+	}
+
+	// Reload untuk mendapatkan data terbaru + preload
+	return s.repo.FindByID(id)
 }
 
 func (s *productService) Delete(id uint) error {

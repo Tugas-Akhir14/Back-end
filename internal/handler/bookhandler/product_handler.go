@@ -69,23 +69,51 @@ func (h *ProductHandler) CreateProduct(c *gin.Context) {
 	c.JSON(http.StatusCreated, product)
 }
 
-// UPDATE WITH IMAGE (OPTIONAL)
 func (h *ProductHandler) UpdateProduct(c *gin.Context) {
-	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
-	var input book.ProductBookUpdate
-	if err := c.ShouldBind(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID tidak valid"})
 		return
 	}
 
-	// === CEK GAMBAR BARU ===
-	if file, err := c.FormFile("gambar"); err == nil {
-		newPath, uploadErr := h.uploadImageFromFile(c, file) // PASS c
-		if uploadErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": uploadErr.Error()})
+	var input book.ProductBookUpdate
+
+	// === PARSE FORM MANUAL (AMAN UNTUK multipart/form-data) ===
+	if v := c.PostForm("nama"); v != "" {
+		input.Nama = &v
+	}
+
+	if v := c.PostForm("deskripsi"); v != "" {
+		input.Deskripsi = &v
+	}
+
+	if v := c.PostForm("harga"); v != "" {
+		if harga, err := strconv.ParseFloat(v, 64); err == nil {
+			input.Harga = &harga
+		}
+	}
+
+	if v := c.PostForm("stok"); v != "" {
+		if stok, err := strconv.Atoi(v); err == nil {
+			input.Stok = &stok
+		}
+	}
+
+	if v := c.PostForm("category_id"); v != "" {
+		if cid, err := strconv.ParseUint(v, 10, 32); err == nil {
+			categoryID := uint(cid)
+			input.CategoryID = &categoryID
+		}
+	}
+
+	// === HANDLE GAMBAR (OPSIONAL) ===
+	if file, err := c.FormFile("gambar"); err == nil && file != nil {
+		uploadedPath, err := h.uploadImageFromFile(c, file)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		input.Gambar = &newPath
+		input.Gambar = &uploadedPath
 	}
 
 	product, err := h.productService.Update(uint(id), input)
@@ -96,6 +124,7 @@ func (h *ProductHandler) UpdateProduct(c *gin.Context) {
 
 	c.JSON(http.StatusOK, product)
 }
+
 
 // LIST ALL + FILTER
 func (h *ProductHandler) ListBooks(c *gin.Context) {
