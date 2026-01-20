@@ -97,11 +97,14 @@ type AvailabilityRequest struct {
     Type     string `form:"type,omitempty"`
 }
 
+// internal/models/hotel/booking.go
 type AvailabilityResponse struct {
-    RoomType       string `json:"room_type"`
-    PricePerNight  int64  `json:"price_per_night"`
-    AvailableRooms int    `json:"available_rooms"`
-    TotalRooms     int    `json:"total_rooms"`
+    RoomType        string `json:"room_type"`
+    BasePrice       int64  `json:"base_price"`        // ← tambah
+    CurrentPrice    int64  `json:"current_price"`     // ← tambah (setelah diskon)
+    DiscountPercent float64 `json:"discount_percent,omitempty"`
+    AvailableRooms  int    `json:"available_rooms"`
+    TotalRooms      int    `json:"total_rooms"`
 }
 
 type UpdateBookingRequest struct {

@@ -62,9 +62,12 @@ func (r *adminRepository) Approve(id uint) error {
 }
 
 func (r *adminRepository) GetPending() ([]auth.Admin, error) {
-	var admins []auth.Admin
-	err := r.db.Where("role LIKE 'admin_%' AND is_approved = ?", false).Find(&admins).Error
-	return admins, err
+    var admins []auth.Admin
+    // Tampilkan SEMUA role admin yang belum approved (kecuali superadmin & guest)
+    err := r.db.
+        Where("is_approved = ? AND role != ? AND role != ?", false, auth.RoleSuperAdmin, auth.RoleGuest).
+        Find(&admins).Error
+    return admins, err
 }
 
 func (r *adminRepository) Update(admin *auth.Admin) error {

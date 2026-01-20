@@ -2,13 +2,9 @@
 package repohotel
 
 import (
-	"database/sql"
 	"fmt"
-	"strings"
 	"time"
-
 	"backend/internal/models/hotel"
-
 	"gorm.io/gorm"
 )
 
@@ -126,33 +122,46 @@ func (r *bookingRepository) CountOverlapping(roomID uint, checkIn, checkOut time
 }
 
 
+// internal/repository/repohotel/booking_repository.go
+
 func (r *bookingRepository) CheckAvailability(checkIn, checkOut time.Time, roomType string) ([]hotel.AvailabilityResponse, error) {
     var results []hotel.AvailabilityResponse
 
-    // PAKAI KOLOM "price" SAJA → INI YANG PASTI ADA DI DATABASE KAMU
     query := `
         SELECT 
             rt.type AS room_type,
-            rt.price AS price_per_night,
-            COUNT(r.id) AS total_rooms,
-            COUNT(r.id) - COUNT(b.id) AS available_rooms
+            rt.base_price AS base_price,
+            CASE 
+                WHEN rt.discount_percentage > 0 
+                     AND rt.discount_start IS NOT NULL 
+                     AND rt.discount_end IS NOT NULL 
+                     AND NOW() BETWEEN rt.discount_start AND rt.discount_end 
+                THEN FLOOR(rt.base_price * (1 - rt.discount_percentage / 100))
+                ELSE rt.base_price 
+            END AS current_price,
+            rt.discount_percentage AS discount_percent,
+            COUNT(DISTINCT r.id) AS total_rooms,
+            COUNT(DISTINCT CASE WHEN b.id IS NULL THEN r.id END) AS available_rooms
         FROM room_types rt
-        LEFT JOIN rooms r ON r.room_type_id = rt.id AND r.deleted_at IS NULL
+        LEFT JOIN rooms r ON r.room_type_id = rt.id 
+                         AND r.deleted_at IS NULL
         LEFT JOIN bookings b ON b.room_id = r.id 
-            AND b.status IN ('pending', 'confirmed', 'checked_in')
-            AND b.deleted_at IS NULL
-            AND (
-                (b.check_in < ? AND b.check_out > ?) OR
-                (b.check_in < ? AND b.check_out > ?) OR
-                (b.check_in >= ? AND b.check_out <= ?)
-            )
+                            AND b.deleted_at IS NULL
+                            AND b.status IN ('pending', 'confirmed', 'checked_in')
+                            AND (
+                                (b.check_in < ? AND b.check_out > ?) OR
+                                (b.check_in < ? AND b.check_out > ?) OR
+                                (b.check_in >= ? AND b.check_out <= ?) OR
+                                (b.check_in <= ? AND b.check_out >= ?)
+                            )
         WHERE rt.deleted_at IS NULL
     `
 
     params := []interface{}{
         checkOut, checkIn,
-        checkIn, checkOut,
-        checkIn, checkOut,
+        checkIn,  checkOut,
+        checkIn,  checkOut,
+        checkIn,  checkOut,
     }
 
     if roomType != "" {
@@ -160,30 +169,14 @@ func (r *bookingRepository) CheckAvailability(checkIn, checkOut time.Time, roomT
         params = append(params, roomType)
     }
 
-    query += " GROUP BY rt.id, rt.type, rt.price"
+    query += `
+        GROUP BY rt.id, rt.type, rt.base_price, rt.discount_percentage, rt.discount_start, rt.discount_end
+        ORDER BY rt.type
+    `
 
-    rows, err := r.db.Raw(query, params...).Rows()
+    err := r.db.Raw(query, params...).Scan(&results).Error
     if err != nil {
-        return nil, fmt.Errorf("query error: %w", err)
-    }
-    defer rows.Close()
-
-    for rows.Next() {
-        var res hotel.AvailabilityResponse
-        var roomTypeStr string
-        var price int64
-        var totalRooms, availableRooms sql.NullInt64
-
-        if err := rows.Scan(&roomTypeStr, &price, &totalRooms, &availableRooms); err != nil {
-            return nil, fmt.Errorf("scan error: %w", err)
-        }
-
-        res.RoomType = strings.Title(strings.ToLower(roomTypeStr))
-        res.PricePerNight = price
-        res.TotalRooms = int(totalRooms.Int64)
-        res.AvailableRooms = int(availableRooms.Int64)
-
-        results = append(results, res)
+        return nil, fmt.Errorf("availability query failed: %w", err)
     }
 
     return results, nil

@@ -194,7 +194,7 @@ func seedSuperAdmin(db *gorm.DB) {
 
 	super := auth.Admin{
 		FullName:    "Super Admin",
-		Email:       "supperpedrooo@gmail.com",
+		Email:       "superadmin@gmail.com",
 		PhoneNumber: "08123456789",
 		Password:    string(hashed),
 		Role:        auth.RoleSuperAdmin,
@@ -211,7 +211,7 @@ func seedSuperAdmin(db *gorm.DB) {
 		if err := db.Create(&super).Error; err != nil {
 			log.Printf("Gagal seed superadmin: %v", err)
 		} else {
-			log.Println("Superadmin berhasil dibuat: supperpedrooo@gmail.com")
+			log.Println("Superadmin berhasil dibuat: superadmin@gmail.com")
 		}
 	}
 }	

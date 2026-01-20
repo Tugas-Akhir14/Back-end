@@ -18,6 +18,7 @@ const (
 	BASE_GUESTS_INCLUDED = 2                    // 2 orang include breakfast
 	EXTRA_GUEST_PRICE    = 150000               // Rp150.000/orang/malam
 	MAX_GUESTS_PER_ROOM  = 4                    // maksimal 4 orang per kamar
+	CHECKIN_HOUR_LIMIT   = 14                   // contoh: check-in setelah jam 14:00 di hari yang sama
 )
 
 type BookingService interface {
@@ -54,12 +55,11 @@ func NewBookingService(bookingRepo repohotel.BookingRepository, roomRepo repohot
 	}
 }
 
-
 func (s *bookingService) Create(userID uint, req hotel.CreateBookingRequest, source hotel.BookingSource, otaRef string, initialStatus hotel.BookingStatus) (*hotel.MultiBookingResponse, error) {
 	// Validasi jumlah tamu
 	maxGuests := req.Rooms * MAX_GUESTS_PER_ROOM
 	if req.Guests > maxGuests {
-		return nil, fmt.Errorf("maksimal %d tamu untuk %d kamar (4 orang/kamar)", maxGuests, req.Rooms)
+		return nil, fmt.Errorf("maksimal %d tamu untuk %d kamar (maks 4 orang/kamar)", maxGuests, req.Rooms)
 	}
 	if req.Guests < 1 {
 		return nil, errors.New("minimal 1 tamu")
@@ -74,8 +74,19 @@ func (s *bookingService) Create(userID uint, req hotel.CreateBookingRequest, sou
 	if err != nil {
 		return nil, errors.New("format check_out tidak valid (YYYY-MM-DD)")
 	}
+
 	if !checkOut.After(checkIn) {
 		return nil, errors.New("check_out harus setelah check_in")
+	}
+
+	// Cegah booking di masa lalu
+	todayStart := time.Now().Truncate(24 * time.Hour)
+	if checkIn.Before(todayStart) {
+		return nil, errors.New("check-in tidak boleh di masa lalu")
+	}
+	// Opsional: jika check-in hari ini, cek jam
+	if checkIn.Equal(todayStart) && time.Now().Hour() >= CHECKIN_HOUR_LIMIT {
+		// Bisa dihapus atau disesuaikan dengan kebijakan hotel
 	}
 
 	nights := int(checkOut.Sub(checkIn).Hours() / 24)
@@ -83,57 +94,84 @@ func (s *bookingService) Create(userID uint, req hotel.CreateBookingRequest, sou
 		return nil, errors.New("minimal menginap 1 malam")
 	}
 
-	// Cek availability
-	avail, err := s.bookingRepo.CheckAvailability(checkIn, checkOut, req.RoomType)
-	if err != nil || len(avail) == 0 {
-		return nil, errors.New("tipe kamar tidak tersedia")
+	// Cek ketersediaan
+	availList, err := s.bookingRepo.CheckAvailability(checkIn, checkOut, req.RoomType)
+	if err != nil {
+		return nil, fmt.Errorf("gagal memeriksa ketersediaan: %w", err)
 	}
-	if avail[0].AvailableRooms < req.Rooms {
-		return nil, fmt.Errorf("hanya tersedia %d kamar %s", avail[0].AvailableRooms, strings.Title(req.RoomType))
+	if len(availList) == 0 {
+		return nil, errors.New("tipe kamar tidak ditemukan")
 	}
 
-	// Hitung extra guests secara adil
+	avail := availList[0]
+	if avail.AvailableRooms < req.Rooms {
+		return nil, fmt.Errorf("hanya tersedia %d kamar %s untuk periode tersebut", avail.AvailableRooms, strings.Title(req.RoomType))
+	}
+
+	// Gunakan CurrentPrice (sudah termasuk diskon jika aktif)
+	roomPricePerNight := avail.CurrentPrice
+	if roomPricePerNight == 0 {
+		roomPricePerNight = avail.BasePrice // fallback jika diskon tidak aktif
+	}
+
+	// Hitung biaya
 	totalBaseGuests := req.Rooms * BASE_GUESTS_INCLUDED
 	totalExtraGuests := max(0, req.Guests-totalBaseGuests)
 	extraCharge := int64(totalExtraGuests) * EXTRA_GUEST_PRICE * int64(nights)
-	basePrice := int64(nights) * avail[0].PricePerNight * int64(req.Rooms)
+
+	basePrice := int64(nights) * roomPricePerNight * int64(req.Rooms)
 	totalPrice := basePrice + extraCharge
 
 	tx := s.db.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
 	if tx.Error != nil {
-		return nil, errors.New("gagal memulai transaksi")
+		return nil, errors.New("gagal memulai transaksi database")
 	}
 
-	// Ambil kamar yang tersedia
-	var rooms []hotel.Room
+	// Ambil daftar kamar yang benar-benar tersedia
+	var availableRoomIDs []uint
 	err = tx.Raw(`
-		SELECT r.* FROM rooms r
-		JOIN room_types rt ON r.room_type_id = rt.id
-		WHERE rt.type = ? AND r.deleted_at IS NULL
-		  AND r.id NOT IN (
-		    SELECT room_id FROM bookings
-		    WHERE status IN ('pending','confirmed','checked_in')
-		      AND (
-		        (check_in < ? AND check_out > ?) OR
-		        (check_in < ? AND check_out > ?) OR
-		        (check_in >= ? AND check_out <= ?) OR
-		        (check_in <= ? AND check_out >= ?)
-		      )
+		SELECT r.id
+		FROM rooms r
+		JOIN room_types rt ON rt.id = r.room_type_id
+		WHERE LOWER(rt.type) = LOWER(?)
+		  AND r.deleted_at IS NULL
+		  AND NOT EXISTS (
+		      SELECT 1 FROM bookings b
+		      WHERE b.room_id = r.id
+		        AND b.deleted_at IS NULL
+		        AND b.status IN ('pending', 'confirmed', 'checked_in')
+		        AND (
+		            (b.check_in < ? AND b.check_out > ?) OR
+		            (b.check_in < ? AND b.check_out > ?) OR
+		            (b.check_in >= ? AND b.check_out <= ?) OR
+		            (b.check_in <= ? AND b.check_out >= ?)
+		        )
 		  )
+		ORDER BY r.id ASC
 		LIMIT ?
 	`, req.RoomType, checkOut, checkIn, checkIn, checkOut, checkIn, checkOut, checkIn, checkOut, req.Rooms).
-		Scan(&rooms).Error
+		Scan(&availableRoomIDs).Error
 
-	if err != nil || len(rooms) < req.Rooms {
+	if err != nil {
 		tx.Rollback()
-		return nil, errors.New("kamar tidak cukup tersedia")
+		return nil, fmt.Errorf("gagal mendapatkan daftar kamar tersedia: %w", err)
+	}
+
+	if len(availableRoomIDs) < req.Rooms {
+		tx.Rollback()
+		return nil, fmt.Errorf("ketersediaan kamar berubah, hanya tersedia %d kamar %s", len(availableRoomIDs), req.RoomType)
 	}
 
 	// Simpan semua booking
 	var bookingIDs []uint
-	for _, room := range rooms {
+	for _, roomID := range availableRoomIDs {
 		booking := &hotel.Booking{
-			RoomID:       room.ID,
+			RoomID:       roomID,
 			UserID:       &userID,
 			Name:         req.Name,
 			Phone:        req.Phone,
@@ -151,15 +189,19 @@ func (s *bookingService) Create(userID uint, req hotel.CreateBookingRequest, sou
 			Source:       source,
 			OtaReference: otaRef,
 		}
+
 		if err := tx.Create(booking).Error; err != nil {
 			tx.Rollback()
-			return nil, err
+			return nil, fmt.Errorf("gagal menyimpan booking: %w", err)
 		}
+
 		bookingIDs = append(bookingIDs, booking.ID)
 
-		// Jika initial status bukan pending, update room status
+		// Update status kamar jika booking langsung confirmed/checked_in
 		if initialStatus != hotel.BookingStatusPending {
-			if err := s.updateRoomStatus(tx, booking, room); err != nil {
+			if err := tx.Model(&hotel.Room{}).
+				Where("id = ?", roomID).
+				Update("status", hotel.RoomStatusBooked).Error; err != nil {
 				tx.Rollback()
 				return nil, err
 			}
@@ -167,20 +209,19 @@ func (s *bookingService) Create(userID uint, req hotel.CreateBookingRequest, sou
 	}
 
 	if err := tx.Commit().Error; err != nil {
-		return nil, err
+		return nil, fmt.Errorf("gagal commit transaksi: %w", err)
 	}
 
 	var waURL string
 	if source == hotel.SourceWeb {
-		waURL = s.generateWhatsAppURLMulti(req, avail[0], nights, totalPrice, int64(totalExtraGuests), checkIn, checkOut)
-	} // Untuk OTA/onsite, tidak generate WA URL, atau generate different jika perlu
+		waURL = s.generateWhatsAppURLMulti(req, avail, nights, totalPrice, int64(totalExtraGuests), checkIn, checkOut, roomPricePerNight)
+	}
 
 	return &hotel.MultiBookingResponse{
 		BookingIDs:  bookingIDs,
 		WhatsAppURL: waURL,
 	}, nil
 }
-
 
 func (s *bookingService) generateWhatsAppURLMulti(
 	req hotel.CreateBookingRequest,
@@ -189,14 +230,23 @@ func (s *bookingService) generateWhatsAppURLMulti(
 	totalPrice int64,
 	totalExtraGuests int64,
 	checkIn, checkOut time.Time,
+	pricePerNight int64,
 ) string {
 	extraCharge := totalExtraGuests * EXTRA_GUEST_PRICE * int64(nights)
 	basePrice := totalPrice - extraCharge
 
 	extraText := ""
 	if totalExtraGuests > 0 {
-		extraText = fmt.Sprintf("\nTamu Ekstra    : %d orang × Rp150.000 × %d malam = *Rp%s*\n(Sudah termasuk breakfast & amenities)",
+		extraText = fmt.Sprintf("\nTamu Ekstra    : %d orang × Rp150.000 × %d malam = *Rp%s*\n(Sudah termasuk sarapan & amenities dasar)",
 			totalExtraGuests, nights, formatRupiah(extraCharge))
+	}
+
+	discountInfo := ""
+	if avail.DiscountPercent > 0 {
+		discountInfo = fmt.Sprintf("\nDiskon aktif   : %.0f%% (harga normal Rp%s → Rp%s)",
+			avail.DiscountPercent,
+			formatRupiah(avail.BasePrice),
+			formatRupiah(pricePerNight))
 	}
 
 	msg := fmt.Sprintf(`*PESANAN KAMAR – MUTIARA HOTEL*
@@ -211,9 +261,19 @@ Check-in       : %s
 Check-out      : %s
 Lama Menginap  : %d malam
 Jumlah Tamu    : %d orang%s
+%s
 
 Harga per Malam: Rp%s
-Subtotal Kamar : Rp%s × %d kamar × %d malam = *Rp%s*`,
+Subtotal Kamar : Rp%s × %d kamar × %d malam = Rp%s
+%s
+──────────────────────────
+*TOTAL PEMBAYARAN : Rp%s*
+
+Catatan tambahan:
+%s
+
+Silakan kirim bukti pembayaran untuk konfirmasi lebih cepat.
+Terima kasih atas kepercayaannya! 🙏`,
 		req.Name,
 		req.Phone,
 		req.Email,
@@ -224,27 +284,13 @@ Subtotal Kamar : Rp%s × %d kamar × %d malam = *Rp%s*`,
 		nights,
 		req.Guests,
 		extraText,
-		formatRupiah(avail.PricePerNight),
-		formatRupiah(avail.PricePerNight),
+		discountInfo,
+		formatRupiah(pricePerNight),
+		formatRupiah(pricePerNight),
 		req.Rooms,
 		nights,
 		formatRupiah(basePrice),
-	)
-
-	// TAMBAHKAN EXTRA CHARGE HANYA SEKALI DI SINI!
-	if totalExtraGuests > 0 {
-		msg += extraText
-	}
-
-	msg += fmt.Sprintf(`
-──────────────────────────
-*TOTAL BAYAR   : %s*
-
-Catatan:
-%s
-
-Jika Sudah bayar Silahkan Kirimkan Bukti Pembayaran untuk melakukan Konfirmasi.
-Terima kasih`,
+		extraText,
 		formatRupiah(totalPrice),
 		req.Notes,
 	)
@@ -252,11 +298,13 @@ Terima kasih`,
 	return "https://wa.me/" + s.waNumber + "?text=" + url.QueryEscape(msg)
 }
 
-// ==================================================================
-// UPDATE BOOKING (hanya untuk 1 kamar & pending)
-// ==================================================================
 func (s *bookingService) Update(userID, bookingID uint, req hotel.UpdateBookingRequest) (*hotel.BookingResponse, error) {
 	tx := s.db.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
 	if tx.Error != nil {
 		return nil, errors.New("gagal memulai transaksi")
 	}
@@ -264,11 +312,12 @@ func (s *bookingService) Update(userID, bookingID uint, req hotel.UpdateBookingR
 	booking, err := s.bookingRepo.FindByID(bookingID)
 	if err != nil || booking.UserID == nil || *booking.UserID != userID || booking.Status != hotel.BookingStatusPending {
 		tx.Rollback()
-		return nil, errors.New("booking tidak ditemukan atau tidak bisa diubah")
+		return nil, errors.New("booking tidak ditemukan, bukan milik Anda, atau bukan status pending")
 	}
+
 	if booking.Rooms != 1 {
 		tx.Rollback()
-		return nil, errors.New("update hanya diperbolehkan untuk pemesanan 1 kamar")
+		return nil, errors.New("update hanya diperbolehkan untuk pemesanan 1 kamar saja")
 	}
 
 	// Tanggal baru
@@ -324,6 +373,8 @@ func (s *bookingService) Update(userID, bookingID uint, req hotel.UpdateBookingR
 
 	extraGuests := max(0, guests-BASE_GUESTS_INCLUDED)
 	extraCharge := int64(extraGuests) * EXTRA_GUEST_PRICE * int64(nights)
+
+	// Gunakan BasePrice (bisa diganti ke CurrentPrice jika ingin diskon berlaku saat update)
 	totalPrice := int64(nights)*room.RoomType.BasePrice + extraCharge
 
 	booking.CheckIn = newCheckIn
@@ -341,6 +392,7 @@ func (s *bookingService) Update(userID, bookingID uint, req hotel.UpdateBookingR
 		tx.Rollback()
 		return nil, err
 	}
+
 	tx.Commit()
 
 	waURL := s.generateWhatsAppURLSingle(booking, room, nights)
@@ -383,17 +435,17 @@ Catatan: %s`,
 	return "https://wa.me/" + s.waNumber + "?text=" + url.QueryEscape(msg)
 }
 
-// ==================================================================
-// ADMIN FUNCTIONS (Confirm, Cancel, dll)
-// ==================================================================
 func (s *bookingService) Confirm(id uint) error {
 	tx := s.db.Begin()
-	b, err := s.bookingRepo.FindByID(id)
-	if err != nil || b.Status != hotel.BookingStatusPending {
-		if tx.Error == nil {
+	defer func() {
+		if r := recover(); r != nil {
 			tx.Rollback()
 		}
-		return errors.New("booking tidak valid atau bukan pending")
+	}()
+	b, err := s.bookingRepo.FindByID(id)
+	if err != nil || b.Status != hotel.BookingStatusPending {
+		tx.Rollback()
+		return errors.New("booking tidak valid atau bukan status pending")
 	}
 	b.Status = hotel.BookingStatusConfirmed
 	if err := tx.Save(b).Error; err != nil {
@@ -409,11 +461,14 @@ func (s *bookingService) Confirm(id uint) error {
 
 func (s *bookingService) Cancel(id uint) error {
 	tx := s.db.Begin()
-	b, err := s.bookingRepo.FindByID(id)
-	if err != nil {
-		if tx.Error == nil {
+	defer func() {
+		if r := recover(); r != nil {
 			tx.Rollback()
 		}
+	}()
+	b, err := s.bookingRepo.FindByID(id)
+	if err != nil {
+		tx.Rollback()
 		return err
 	}
 	b.Status = hotel.BookingStatusCancelled
@@ -439,6 +494,11 @@ func (s *bookingService) CheckAvailability(checkIn, checkOut time.Time, roomType
 
 func (s *bookingService) UpdateStatus(bookingID uint, newStatus hotel.BookingStatus) error {
 	tx := s.db.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
 	b, err := s.bookingRepo.FindByID(bookingID)
 	if err != nil {
 		tx.Rollback()
@@ -446,7 +506,7 @@ func (s *bookingService) UpdateStatus(bookingID uint, newStatus hotel.BookingSta
 	}
 	if !s.isValidStatusTransition(b.Status, newStatus) {
 		tx.Rollback()
-		return fmt.Errorf("transisi status tidak diperbolehkan")
+		return fmt.Errorf("transisi status tidak diperbolehkan dari %s ke %s", b.Status, newStatus)
 	}
 	b.Status = newStatus
 	if err := tx.Save(b).Error; err != nil {
@@ -469,11 +529,11 @@ func (s *bookingService) UpdateStatus(bookingID uint, newStatus hotel.BookingSta
 
 func (s *bookingService) isValidStatusTransition(from, to hotel.BookingStatus) bool {
 	allowed := map[hotel.BookingStatus][]hotel.BookingStatus{
-		hotel.BookingStatusPending:     {hotel.BookingStatusConfirmed, hotel.BookingStatusCancelled},
-		hotel.BookingStatusConfirmed:   {hotel.BookingStatusCheckedIn, hotel.BookingStatusCancelled},
-		hotel.BookingStatusCheckedIn:   {hotel.BookingStatusCheckedOut},
-		hotel.BookingStatusCancelled:   {},
-		hotel.BookingStatusCheckedOut:  {},
+		hotel.BookingStatusPending:    {hotel.BookingStatusConfirmed, hotel.BookingStatusCancelled},
+		hotel.BookingStatusConfirmed:  {hotel.BookingStatusCheckedIn, hotel.BookingStatusCancelled},
+		hotel.BookingStatusCheckedIn:  {hotel.BookingStatusCheckedOut},
+		hotel.BookingStatusCancelled:  {},
+		hotel.BookingStatusCheckedOut: {},
 	}
 	for _, v := range allowed[from] {
 		if v == to {

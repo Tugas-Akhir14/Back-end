@@ -46,6 +46,8 @@ func (h *AdminHandler) Register(c *gin.Context) {
 		"message": message,
 		"data":    adminResp, // Ini yang aman & sesuai frontend
 	})
+
+	
 }
 
 
