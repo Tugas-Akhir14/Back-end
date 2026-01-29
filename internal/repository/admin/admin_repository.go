@@ -19,11 +19,27 @@ type AdminRepository interface {
 	SaveOTP(email, otp string, expiresAt time.Time) error
     VerifyOTP(email, otp string) (bool, error)
     DeleteOTP(email string) error
+	FindHotelAdmin() (*auth.Admin, error)
+
 }
 
 type adminRepository struct {
 	db *gorm.DB
 }
+
+func (r *adminRepository) FindHotelAdmin() (*auth.Admin, error) {
+	var admin auth.Admin
+
+	err := r.db.
+		Where("role = ? AND is_approved = ?", auth.RoleAdminHotel, true).
+		First(&admin).Error
+
+	if err != nil {
+		return nil, err
+	}
+	return &admin, nil
+}
+
 
 func NewAdminRepository(db *gorm.DB) AdminRepository {
 	return &adminRepository{db}

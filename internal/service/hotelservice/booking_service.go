@@ -4,13 +4,15 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
+	
 	"strconv"
 	"strings"
 	"time"
-
+	"regexp"
 	"backend/internal/models/hotel"
+	"backend/internal/repository/admin"
 	"backend/internal/repository/repohotel"
+
 	"gorm.io/gorm"
 )
 
@@ -35,25 +37,56 @@ type BookingService interface {
 type bookingService struct {
 	bookingRepo repohotel.BookingRepository
 	roomRepo    repohotel.RoomRepository
+	adminRepo   admin.AdminRepository  
 	waNumber    string
 	db          *gorm.DB
 }
 
-func NewBookingService(bookingRepo repohotel.BookingRepository, roomRepo repohotel.RoomRepository, db *gorm.DB) BookingService {
-	waNumber := os.Getenv("HOTEL_WHATSAPP_NUMBER")
-	if waNumber == "" {
-		waNumber = "6281396554949"
-	}
-	if !strings.HasPrefix(waNumber, "62") {
-		waNumber = "62" + strings.TrimLeft(waNumber, "0")
-	}
+func NewBookingService(
+	bookingRepo repohotel.BookingRepository,
+	roomRepo repohotel.RoomRepository,
+	adminRepo admin.AdminRepository,
+	db *gorm.DB,
+) BookingService {
+
 	return &bookingService{
 		bookingRepo: bookingRepo,
 		roomRepo:    roomRepo,
-		waNumber:    waNumber,
+		adminRepo:   adminRepo,
 		db:          db,
 	}
 }
+
+func (s *bookingService) getAdminWANumber() string {
+	admin, err := s.adminRepo.FindHotelAdmin()
+	if err != nil || admin.PhoneNumber == "" {
+		return "6281396554949" // fallback
+	}
+
+	wa := admin.PhoneNumber
+
+	// 🔹 hapus semua karakter non-angka
+	re := regexp.MustCompile(`[^0-9]`)
+	wa = re.ReplaceAllString(wa, "")
+
+	// 🔹 jika diawali 0 → ubah ke 62
+	if strings.HasPrefix(wa, "0") {
+		wa = "62" + wa[1:]
+	}
+
+	// 🔹 jika belum diawali 62
+	if !strings.HasPrefix(wa, "62") {
+		wa = "62" + wa
+	}
+	fmt.Println("WA ADMIN:", wa)
+
+
+	return wa
+
+	
+}
+
+
 
 func (s *bookingService) Create(userID uint, req hotel.CreateBookingRequest, source hotel.BookingSource, otaRef string, initialStatus hotel.BookingStatus) (*hotel.MultiBookingResponse, error) {
 	// Validasi jumlah tamu
@@ -75,6 +108,7 @@ func (s *bookingService) Create(userID uint, req hotel.CreateBookingRequest, sou
 		return nil, errors.New("format check_out tidak valid (YYYY-MM-DD)")
 	}
 
+	
 	if !checkOut.After(checkIn) {
 		return nil, errors.New("check_out harus setelah check_in")
 	}
@@ -237,13 +271,13 @@ func (s *bookingService) generateWhatsAppURLMulti(
 
 	extraText := ""
 	if totalExtraGuests > 0 {
-		extraText = fmt.Sprintf("\nTamu Ekstra    : %d orang × Rp150.000 × %d malam = *Rp%s*\n(Sudah termasuk sarapan & amenities dasar)",
+		extraText = fmt.Sprintf("\nTamu Ekstra    : %d orang × Rp150.000 × %d malam = *%s*\n(Sudah termasuk sarapan & amenities dasar)",
 			totalExtraGuests, nights, formatRupiah(extraCharge))
 	}
 
 	discountInfo := ""
 	if avail.DiscountPercent > 0 {
-		discountInfo = fmt.Sprintf("\nDiskon aktif   : %.0f%% (harga normal Rp%s → Rp%s)",
+		discountInfo = fmt.Sprintf("\nDiskon aktif   : %.0f%% (harga normal %s → %s)",
 			avail.DiscountPercent,
 			formatRupiah(avail.BasePrice),
 			formatRupiah(pricePerNight))
@@ -263,17 +297,17 @@ Lama Menginap  : %d malam
 Jumlah Tamu    : %d orang%s
 %s
 
-Harga per Malam: Rp%s
-Subtotal Kamar : Rp%s × %d kamar × %d malam = Rp%s
+Harga per Malam: %s
+Subtotal Kamar : %s × %d kamar × %d malam = %s
 %s
 ──────────────────────────
-*TOTAL PEMBAYARAN : Rp%s*
+*TOTAL PEMBAYARAN : %s*
 
 Catatan tambahan:
 %s
 
 Silakan kirim bukti pembayaran untuk konfirmasi lebih cepat.
-Terima kasih atas kepercayaannya! 🙏`,
+Terima kasih atas kepercayaannya! `,
 		req.Name,
 		req.Phone,
 		req.Email,
@@ -295,7 +329,9 @@ Terima kasih atas kepercayaannya! 🙏`,
 		req.Notes,
 	)
 
-	return "https://wa.me/" + s.waNumber + "?text=" + url.QueryEscape(msg)
+	wa := s.getAdminWANumber()
+return "https://wa.me/" + wa + "?text=" + url.QueryEscape(msg)
+
 }
 
 func (s *bookingService) Update(userID, bookingID uint, req hotel.UpdateBookingRequest) (*hotel.BookingResponse, error) {
@@ -432,7 +468,9 @@ Catatan: %s`,
 		b.Notes,
 	)
 
-	return "https://wa.me/" + s.waNumber + "?text=" + url.QueryEscape(msg)
+	wa := s.getAdminWANumber()
+return "https://wa.me/" + wa + "?text=" + url.QueryEscape(msg)
+
 }
 
 func (s *bookingService) Confirm(id uint) error {

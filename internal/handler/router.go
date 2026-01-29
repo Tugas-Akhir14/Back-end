@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"backend/internal/handler/authhandler"
+	"backend/internal/repository/admin"
 	"backend/internal/handler/hotel"
 	"backend/internal/handler/souvenirhandler"
 	"backend/internal/handler/bookhandler"
@@ -41,6 +42,10 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 	r.GET("/admins/profile", middleware.AuthMiddleware(), adm.GetProfile)
 	r.PATCH("/admins/profile", middleware.AuthMiddleware(), adm.UpdateProfile)
 	r.PATCH("/admins/profile/password", middleware.AuthMiddleware(), adm.ChangePassword)
+
+
+	adminRepo := admin.NewAdminRepository(db)
+
 
 	// === REPO & HANDLER ===
 	galleryH := hotel.NewGalleryHandler(hotelservice.NewGalleryService(repohotel.NewGalleryRepository(db)))
@@ -72,12 +77,7 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 	reviewService := hotelservice.NewReviewService(reviewRepo)
 	reviewH := hotel.NewReviewHandler(reviewService)
 
-	// BOOKING → PASS db
-	bookingRepo := repohotel.NewBookingRepository(db)
-	bookingService := hotelservice.NewBookingService(bookingRepo, repohotel.NewRoomRepository(db), db)
-	bookingH := hotel.NewBookingHandler(bookingService)
-
-	// Di dalam SetupRoutes
+		// Di dalam SetupRoutes
 	roomRepo := repohotel.NewRoomRepository(db)
 	roomTypeRepo := repohotel.NewRoomTypeRepository(db)
 
@@ -86,6 +86,20 @@ func SetupRoutes(r *gin.Engine, adminService serviceauth.AdminService, db *gorm.
 
 	roomH := hotel.NewRoomHandler(roomService)
 	roomTypeH := hotel.NewRoomTypeHandler(roomTypeService)
+	
+
+	// BOOKING → PASS db
+	bookingRepo := repohotel.NewBookingRepository(db)
+	bookingService := hotelservice.NewBookingService(
+    bookingRepo,
+    roomRepo,
+    adminRepo,
+    db,
+)
+
+	bookingH := hotel.NewBookingHandler(bookingService)
+
+
 	// === PUBLIC API ===
 	public := r.Group("/public")
 	{

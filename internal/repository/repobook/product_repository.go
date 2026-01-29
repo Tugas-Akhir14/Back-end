@@ -21,6 +21,7 @@ func NewProductRepository(db *gorm.DB) ProductRepository {
     return &productRepository{db}
 }
 
+
 func (r *productRepository) Create(product *book.ProductBook) error {
     return r.db.Create(product).Error
 }

@@ -103,7 +103,7 @@ func main() {
 	}
 
 	go func() {
-		log.Println("Server berjalan di http://localhost:8080")
+		log.Println("Server berjalan di http://localhost:	")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server error: %v", err)
 		}
@@ -184,6 +184,8 @@ func startAutoCheckout(db *gorm.DB) {
         }
     }
 }
+
+
 
 func seedSuperAdmin(db *gorm.DB) {
 	hashed, err := bcrypt.GenerateFromPassword([]byte("rahasia123"), bcrypt.DefaultCost)
