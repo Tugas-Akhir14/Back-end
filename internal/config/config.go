@@ -55,15 +55,28 @@ func GetConfig() *Config {
 
 func InitDB() *gorm.DB {
 	dbOnce.Do(func() {
+
+		rawURL := GetConfig().DatabaseURL
+
+		// contoh rawURL:
+		// mysql://user:pass@host:port/dbname
+
+		dsn := strings.Replace(rawURL, "mysql://", "", 1)
+		dsn = strings.Replace(dsn, "@", "@tcp(", 1)
+		dsn = strings.Replace(dsn, "/", ")/", 1)
+		dsn = dsn + "?parseTime=true"
+
 		var err error
-		db, err = gorm.Open(mysql.Open(GetConfig().DatabaseURL), &gorm.Config{})
+		db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 		if err != nil {
 			log.Fatalf("Gagal konek database: %v", err)
 		}
+
 		log.Println("Database connected!")
 	})
 	return db
 }
+
 
 func GetDB() *gorm.DB {
 	if db == nil {
@@ -71,3 +84,4 @@ func GetDB() *gorm.DB {
 	}
 	return db
 }
+
