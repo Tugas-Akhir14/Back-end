@@ -30,7 +30,7 @@ func LoadConfig() {
 	once.Do(func() {
 
 		instance = &Config{
-			DatabaseURL: os.Getenv("MYSQL_URL"),
+			DatabaseURL: os.Getenv("DATABASE_URL"),
 			JWTSecret:   os.Getenv("JWT_SECRET"),
 			SMTPHost:    os.Getenv("SMTP_HOST"),
 			SMTPPort:    os.Getenv("SMTP_PORT"),
@@ -93,6 +93,7 @@ func GetDB() *gorm.DB {
 	}
 	return db
 }
+
 
 
 
