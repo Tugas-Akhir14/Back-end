@@ -1,11 +1,10 @@
-// internal/config/config.go
 package config
 
 import (
 	"log"
+	"os"
 	"sync"
 
-	"github.com/spf13/viper"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -26,21 +25,20 @@ var (
 	dbOnce   sync.Once
 )
 
-// LoadConfig — panggil sekali dari main.go
 func LoadConfig() {
 	once.Do(func() {
-		viper.SetConfigFile(".env")
-		if err := viper.ReadInConfig(); err != nil {
-			log.Fatalf("Error reading .env file: %v", err)
-		}
 
 		instance = &Config{
-			DatabaseURL: viper.GetString("DATABASE_URL"),
-			JWTSecret:   viper.GetString("JWT_SECRET"),
-			SMTPHost:    viper.GetString("SMTP_HOST"),
-			SMTPPort:    viper.GetString("SMTP_PORT"),
-			SMTPUser:    viper.GetString("SMTP_USER"),
-			SMTPPass:    viper.GetString("SMTP_PASS"),
+			DatabaseURL: os.Getenv("MYSQL_URL"),
+			JWTSecret:   os.Getenv("JWT_SECRET"),
+			SMTPHost:    os.Getenv("SMTP_HOST"),
+			SMTPPort:    os.Getenv("SMTP_PORT"),
+			SMTPUser:    os.Getenv("SMTP_USER"),
+			SMTPPass:    os.Getenv("SMTP_PASS"),
+		}
+
+		if instance.DatabaseURL == "" {
+			log.Fatal("MYSQL_URL belum diset di environment")
 		}
 
 		log.Println("Config loaded successfully")
@@ -48,20 +46,17 @@ func LoadConfig() {
 	})
 }
 
-// GetConfig — aman dipanggil kapan saja setelah LoadConfig()
 func GetConfig() *Config {
 	if instance == nil {
-		log.Fatal("Config belum di-load! Panggil config.LoadConfig() dulu")
+		log.Fatal("Config belum di-load")
 	}
 	return instance
 }
 
-// InitDB — inisialisasi DB sekali
 func InitDB() *gorm.DB {
 	dbOnce.Do(func() {
-		dsn := GetConfig().DatabaseURL
 		var err error
-		db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
+		db, err = gorm.Open(mysql.Open(GetConfig().DatabaseURL), &gorm.Config{})
 		if err != nil {
 			log.Fatalf("Gagal konek database: %v", err)
 		}
@@ -70,7 +65,6 @@ func InitDB() *gorm.DB {
 	return db
 }
 
-// GetDB — untuk dipakai di handler kalau perlu
 func GetDB() *gorm.DB {
 	if db == nil {
 		return InitDB()
