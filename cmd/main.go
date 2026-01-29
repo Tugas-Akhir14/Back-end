@@ -97,13 +97,19 @@ func main() {
 	r.Static("/uploads", "./uploads")
 
 	// === SERVER ===
-	srv := &http.Server{
-		Addr:    ":8080",
-		Handler: r,
-	}
+port := os.Getenv("PORT")
+if port == "" {
+	port = "8080"
+}
+
+srv := &http.Server{
+	Addr:    ":" + port,
+	Handler: r,
+}
+
 
 	go func() {
-		log.Println("Server berjalan di http://localhost:	")
+		log.Println("Server berjalan di http://localhost:" + port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server error: %v", err)
 		}
@@ -216,4 +222,5 @@ func seedSuperAdmin(db *gorm.DB) {
 			log.Println("Superadmin berhasil dibuat: superadmin@gmail.com")
 		}
 	}
+
 }	
