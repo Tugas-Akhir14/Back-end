@@ -28,11 +28,14 @@ import (
 
 func main() {
 	
+	if os.Getenv("RAILWAY_ENVIRONMENT_NAME") == "" {
 	if err := godotenv.Load(); err != nil {
-		log.Println("⚠️  .env tidak ditemukan, pakai system environment")
+		log.Println("⚠️  .env tidak ditemukan")
 	} else {
 		log.Println("✅ .env berhasil dimuat")
 	}
+}
+
 
 	config.LoadConfig()
 
@@ -224,3 +227,4 @@ func seedSuperAdmin(db *gorm.DB) {
 	}
 
 }	
+
