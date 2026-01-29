@@ -5,6 +5,7 @@ import (
 	"os"
 	"sync"
 	"strings"
+	"net/url"    
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -57,16 +58,22 @@ func InitDB() *gorm.DB {
 	dbOnce.Do(func() {
 
 		rawURL := GetConfig().DatabaseURL
+		if rawURL == "" {
+			log.Fatal("MYSQL_URL kosong")
+		}
 
-		// contoh rawURL:
-		// mysql://user:pass@host:port/dbname
+		u, err := url.Parse(rawURL)
+		if err != nil {
+			log.Fatalf("Invalid MYSQL_URL: %v", err)
+		}
 
-		dsn := strings.Replace(rawURL, "mysql://", "", 1)
-		dsn = strings.Replace(dsn, "@", "@tcp(", 1)
-		dsn = strings.Replace(dsn, "/", ")/", 1)
-		dsn = dsn + "?parseTime=true"
+		user := u.User.Username()
+		pass, _ := u.User.Password()
+		host := u.Host
+		dbname := strings.TrimPrefix(u.Path, "/")
 
-		var err error
+		dsn := user + ":" + pass + "@tcp(" + host + ")/" + dbname + "?parseTime=true"
+
 		db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 		if err != nil {
 			log.Fatalf("Gagal konek database: %v", err)
@@ -74,8 +81,10 @@ func InitDB() *gorm.DB {
 
 		log.Println("Database connected!")
 	})
+
 	return db
 }
+
 
 
 func GetDB() *gorm.DB {
@@ -84,5 +93,6 @@ func GetDB() *gorm.DB {
 	}
 	return db
 }
+
 
 
