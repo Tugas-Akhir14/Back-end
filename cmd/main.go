@@ -81,14 +81,22 @@ func main() {
 	r := gin.Default()
 
 	corsCfg := cors.Config{
-		AllowOrigins:     []string{"https://frontend-c2mq3w3fz-pedros-projects-91760395.vercel.app"},
-		AllowOrigins:     []string{"http://localhost:3000"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
-	}
-	r.Use(cors.New(corsCfg))
+    AllowOrigins: []string{
+        "http://localhost:3000",
+        "https://frontend-c2mq3w3fz-pedros-projects-91760395.vercel.app",
+    },
+    AllowMethods: []string{
+        "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS",
+    },
+    AllowHeaders: []string{
+        "Origin", "Content-Type", "Authorization",
+    },
+    AllowCredentials: true,
+    MaxAge: 12 * time.Hour,
+}
+
+r.Use(cors.New(corsCfg))
+
 	r.MaxMultipartMemory = 8 << 20
 
 	// === ROUTES ===
@@ -228,5 +236,6 @@ func seedSuperAdmin(db *gorm.DB) {
 	}
 
 }	
+
 
 
